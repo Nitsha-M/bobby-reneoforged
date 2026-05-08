@@ -6,34 +6,34 @@ import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
 import de.johni0702.minecraft.bobby.ext.LightingProviderExt;
 import de.johni0702.minecraft.bobby.ext.WorldChunkExt;
 import net.minecraft.SharedConstants;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtLongArray;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.Registry;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.core.SectionPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.network.packet.s2c.play.LightData;
-import net.minecraft.registry.DynamicRegistryManager;
-import net.minecraft.registry.Registry;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.ChunkSectionPos;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.LightType;
-import net.minecraft.world.World;
-import net.minecraft.world.biome.Biome;
-import net.minecraft.world.biome.BiomeKeys;
-import net.minecraft.world.chunk.ChunkManager;
-import net.minecraft.world.chunk.ChunkNibbleArray;
-import net.minecraft.world.chunk.ChunkSection;
-import net.minecraft.world.chunk.PalettedContainer;
-import net.minecraft.world.chunk.ReadableContainer;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.chunk.light.LightingProvider;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkSource;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.chunk.PalettedContainerRO;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.lighting.LevelLightEngine;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -49,8 +49,8 @@ import java.util.function.Supplier;
 public class ChunkSerializer {
     private static final Logger LOGGER = LogManager.getLogger();
 
-    private static final ChunkNibbleArray COMPLETELY_DARK = new ChunkNibbleArray();
-    private static final ChunkNibbleArray COMPLETELY_LIT = new ChunkNibbleArray();
+    private static final DataLayer COMPLETELY_DARK = new DataLayer();
+    private static final DataLayer COMPLETELY_LIT = new DataLayer();
     static {
         for (int x = 0; x < 16; x++) {
             for (int y = 0; y < 16; y++) {
@@ -60,62 +60,62 @@ public class ChunkSerializer {
             }
         }
     }
-    private static final Codec<PalettedContainer<BlockState>> BLOCK_CODEC = PalettedContainer.createPalettedContainerCodec(
-            Block.STATE_IDS,
+    private static final Codec<PalettedContainer<BlockState>> BLOCK_CODEC = PalettedContainer.codecRW(
+            Block.BLOCK_STATE_REGISTRY,
             BlockState.CODEC,
-            PalettedContainer.PaletteProvider.BLOCK_STATE,
-            Blocks.AIR.getDefaultState()
+            PalettedContainer.Strategy.SECTION_STATES,
+            Blocks.AIR.defaultBlockState()
     );
 
-    public static NbtCompound serialize(WorldChunk chunk, LightingProvider lightingProvider) {
-        DynamicRegistryManager registryManager = chunk.getWorld().getRegistryManager();
-        Registry<Biome> biomeRegistry = registryManager.get(RegistryKeys.BIOME);
-        Codec<ReadableContainer<RegistryEntry<Biome>>> biomeCodec = PalettedContainer.createReadableContainerCodec(
-                biomeRegistry.getIndexedEntries(),
-                biomeRegistry.getEntryCodec(),
-                PalettedContainer.PaletteProvider.BIOME,
-                biomeRegistry.entryOf(BiomeKeys.PLAINS)
+    public static CompoundTag serialize(LevelChunk chunk, LevelLightEngine lightingProvider) {
+        RegistryAccess registryManager = chunk.getLevel().registryAccess();
+        Registry<Biome> biomeRegistry = registryManager.registryOrThrow(Registries.BIOME);
+        Codec<PalettedContainerRO<Holder<Biome>>> biomeCodec = PalettedContainer.codecRO(
+                biomeRegistry.asHolderIdMap(),
+                biomeRegistry.holderByNameCodec(),
+                PalettedContainer.Strategy.SECTION_BIOMES,
+                biomeRegistry.getHolderOrThrow(Biomes.PLAINS)
         );
 
         ChunkPos chunkPos = chunk.getPos();
-        NbtCompound level = new NbtCompound();
-        level.putInt("DataVersion", SharedConstants.getGameVersion().getSaveVersion().getId());
+        CompoundTag level = new CompoundTag();
+        level.putInt("DataVersion", SharedConstants.getCurrentVersion().getDataVersion().getVersion());
         level.putInt("xPos", chunkPos.x);
-        level.putInt("yPos", chunk.getBottomSectionCoord());
+        level.putInt("yPos", chunk.getMinSection());
         level.putInt("zPos", chunkPos.z);
         level.putBoolean("isLightOn", true);
         level.putString("Status", "full");
 
-        ChunkSection[] chunkSections = chunk.getSectionArray();
-        NbtList sectionsTag = new NbtList();
+        LevelChunkSection[] chunkSections = chunk.getSections();
+        ListTag sectionsTag = new ListTag();
 
-        for (int y = lightingProvider.getBottomY(); y < lightingProvider.getTopY(); y++) {
+        for (int y = lightingProvider.getMinLightSection(); y < lightingProvider.getMaxLightSection(); y++) {
             boolean empty = true;
 
-            NbtCompound sectionTag = new NbtCompound();
+            CompoundTag sectionTag = new CompoundTag();
             sectionTag.putByte("Y", (byte) y);
 
-            int i = chunk.sectionCoordToIndex(y);
-            ChunkSection chunkSection = i >= 0 && i < chunkSections.length ? chunkSections[i] : null;
+            int i = chunk.getSectionIndexFromSectionY(y);
+            LevelChunkSection chunkSection = i >= 0 && i < chunkSections.length ? chunkSections[i] : null;
             if (chunkSection != null) {
-                sectionTag.put("block_states", BLOCK_CODEC.encodeStart(NbtOps.INSTANCE, chunkSection.getBlockStateContainer()).getOrThrow());
-                sectionTag.put("biomes", biomeCodec.encodeStart(NbtOps.INSTANCE, chunkSection.getBiomeContainer()).getOrThrow());
+                sectionTag.put("block_states", BLOCK_CODEC.encodeStart(NbtOps.INSTANCE, chunkSection.getStates()).getOrThrow());
+                sectionTag.put("biomes", biomeCodec.encodeStart(NbtOps.INSTANCE, chunkSection.getBiomes()).getOrThrow());
                 empty = false;
             }
 
-            ChunkNibbleArray blockLight = chunk instanceof FakeChunk fakeChunk
+            DataLayer blockLight = chunk instanceof FakeChunk fakeChunk
                     ? fakeChunk.blockLight[i + 1]
-                    : lightingProvider.get(LightType.BLOCK).getLightSection(ChunkSectionPos.from(chunkPos, y));
-            if (blockLight != null && !blockLight.isUninitialized()) {
-                sectionTag.putByteArray("BlockLight", blockLight.asByteArray());
+                    : lightingProvider.getLayerListener(LightLayer.BLOCK).getDataLayerData(SectionPos.of(chunkPos, y));
+            if (blockLight != null && !blockLight.isEmpty()) {
+                sectionTag.putByteArray("BlockLight", blockLight.getData());
                 empty = false;
             }
 
-            ChunkNibbleArray skyLight = chunk instanceof FakeChunk fakeChunk
+            DataLayer skyLight = chunk instanceof FakeChunk fakeChunk
                     ? fakeChunk.skyLight[i + 1]
-                    : lightingProvider.get(LightType.SKY).getLightSection(ChunkSectionPos.from(chunkPos, y));
-            if (skyLight != null && !skyLight.isUninitialized()) {
-                sectionTag.putByteArray("SkyLight", skyLight.asByteArray());
+                    : lightingProvider.getLayerListener(LightLayer.SKY).getDataLayerData(SectionPos.of(chunkPos, y));
+            if (skyLight != null && !skyLight.isEmpty()) {
+                sectionTag.putByteArray("SkyLight", skyLight.getData());
                 empty = false;
             }
 
@@ -126,13 +126,13 @@ public class ChunkSerializer {
 
         level.put("sections", sectionsTag);
 
-        NbtList blockEntitiesTag;
+        ListTag blockEntitiesTag;
         if (chunk instanceof FakeChunk fakeChunk) {
             blockEntitiesTag = fakeChunk.serializedBlockEntities;
         } else {
-            blockEntitiesTag = new NbtList();
-            for (BlockPos pos : chunk.getBlockEntityPositions()) {
-                NbtCompound blockEntityTag = chunk.getPackedBlockEntityNbt(pos, registryManager);
+            blockEntitiesTag = new ListTag();
+            for (BlockPos pos : chunk.getBlockEntitiesPos()) {
+                CompoundTag blockEntityTag = chunk.getBlockEntityNbtForSaving(pos, registryManager);
                 if (blockEntityTag != null) {
                     blockEntitiesTag.add(blockEntityTag);
                 }
@@ -140,10 +140,10 @@ public class ChunkSerializer {
         }
         level.put("block_entities", blockEntitiesTag);
 
-        NbtCompound hightmapsTag = new NbtCompound();
-        for (Map.Entry<Heightmap.Type, Heightmap> entry : chunk.getHeightmaps()) {
-            if (chunk.getStatus().getHeightmapTypes().contains(entry.getKey())) {
-                hightmapsTag.put(entry.getKey().getName(), new NbtLongArray(entry.getValue().asLongArray()));
+        CompoundTag hightmapsTag = new CompoundTag();
+        for (Map.Entry<Heightmap.Types, Heightmap> entry : chunk.getHeightmaps()) {
+            if (chunk.getPersistedStatus().heightmapsAfter().contains(entry.getKey())) {
+                hightmapsTag.put(entry.getKey().getSerializationKey(), new LongArrayTag(entry.getValue().getRawData()));
             }
         }
         level.put("Heightmaps", hightmapsTag);
@@ -155,7 +155,7 @@ public class ChunkSerializer {
     //       must be unlikely to loose that thread safety in the presence of third party mods) or must be delayed
     //       by moving them into the returned supplier which is executed on the main thread.
     //       For performance reasons though: The more stuff we can do async, the better.
-    public static Pair<WorldChunk, Supplier<WorldChunk>> deserialize(ChunkPos pos, NbtCompound level, World world) {
+    public static Pair<LevelChunk, Supplier<LevelChunk>> deserialize(ChunkPos pos, CompoundTag level, Level world) {
         BobbyConfig config = Bobby.getInstance().getConfig();
 
         ChunkPos chunkPos = new ChunkPos(level.getInt("xPos"), level.getInt("zPos"));
@@ -163,25 +163,25 @@ public class ChunkSerializer {
             LOGGER.error("Chunk file at {} is in the wrong location; relocating. (Expected {}, got {})", pos, pos, chunkPos);
         }
 
-        Registry<Biome> biomeRegistry = world.getRegistryManager().get(RegistryKeys.BIOME);
-        Codec<PalettedContainer<RegistryEntry<Biome>>> biomeCodec = PalettedContainer.createPalettedContainerCodec(
-                biomeRegistry.getIndexedEntries(),
-                biomeRegistry.getEntryCodec(),
-                PalettedContainer.PaletteProvider.BIOME,
-                biomeRegistry.entryOf(BiomeKeys.PLAINS)
+        Registry<Biome> biomeRegistry = world.registryAccess().registryOrThrow(Registries.BIOME);
+        Codec<PalettedContainer<Holder<Biome>>> biomeCodec = PalettedContainer.codecRW(
+                biomeRegistry.asHolderIdMap(),
+                biomeRegistry.holderByNameCodec(),
+                PalettedContainer.Strategy.SECTION_BIOMES,
+                biomeRegistry.getHolderOrThrow(Biomes.PLAINS)
         );
 
-        NbtList sectionsTag = level.getList("sections", NbtElement.COMPOUND_TYPE);
-        ChunkSection[] chunkSections = new ChunkSection[world.countVerticalSections()];
-        ChunkNibbleArray[] blockLight = new ChunkNibbleArray[chunkSections.length + 2];
-        ChunkNibbleArray[] skyLight = new ChunkNibbleArray[chunkSections.length + 2];
+        ListTag sectionsTag = level.getList("sections", Tag.TAG_COMPOUND);
+        LevelChunkSection[] chunkSections = new LevelChunkSection[world.getSectionsCount()];
+        DataLayer[] blockLight = new DataLayer[chunkSections.length + 2];
+        DataLayer[] skyLight = new DataLayer[chunkSections.length + 2];
 
         Arrays.fill(blockLight, COMPLETELY_DARK);
 
         for (int i = 0; i < sectionsTag.size(); i++) {
-            NbtCompound sectionTag = sectionsTag.getCompound(i);
+            CompoundTag sectionTag = sectionsTag.getCompound(i);
             int y = sectionTag.getByte("Y");
-            int yIndex = world.sectionCoordToIndex(y);
+            int yIndex = world.getSectionIndexFromSectionY(y);
 
             if (yIndex < -1 || yIndex > chunkSections.length) {
                 // There used to be a bug where we pass the block coordinates to the ChunkSection constructor (as was
@@ -199,36 +199,36 @@ public class ChunkSerializer {
 
             if (yIndex >= 0 && yIndex < chunkSections.length) {
                 PalettedContainer<BlockState> blocks;
-                if (sectionTag.contains("block_states", NbtElement.COMPOUND_TYPE)) {
+                if (sectionTag.contains("block_states", Tag.TAG_COMPOUND)) {
                     blocks = BLOCK_CODEC.parse(NbtOps.INSTANCE, sectionTag.getCompound("block_states"))
                             .promotePartial((errorMessage) -> logRecoverableError(chunkPos, y, errorMessage))
                             .getOrThrow();
                 } else {
-                    blocks = new PalettedContainer<>(Block.STATE_IDS, Blocks.AIR.getDefaultState(), PalettedContainer.PaletteProvider.BLOCK_STATE);
+                    blocks = new PalettedContainer<>(Block.BLOCK_STATE_REGISTRY, Blocks.AIR.defaultBlockState(), PalettedContainer.Strategy.SECTION_STATES);
                 }
 
-                PalettedContainer<RegistryEntry<Biome>> biomes;
-                if (sectionTag.contains("biomes", NbtElement.COMPOUND_TYPE)) {
+                PalettedContainer<Holder<Biome>> biomes;
+                if (sectionTag.contains("biomes", Tag.TAG_COMPOUND)) {
                     biomes = biomeCodec.parse(NbtOps.INSTANCE, sectionTag.getCompound("biomes"))
                             .promotePartial((errorMessage) -> logRecoverableError(chunkPos, y, errorMessage))
                             .getOrThrow();
                 } else {
-                    biomes = new PalettedContainer<>(biomeRegistry.getIndexedEntries(), biomeRegistry.entryOf(BiomeKeys.PLAINS), PalettedContainer.PaletteProvider.BIOME);
+                    biomes = new PalettedContainer<>(biomeRegistry.asHolderIdMap(), biomeRegistry.getHolderOrThrow(Biomes.PLAINS), PalettedContainer.Strategy.SECTION_BIOMES);
                 }
 
-                ChunkSection chunkSection = new ChunkSection(blocks, biomes);
-                chunkSection.calculateCounts();
-                if (!chunkSection.isEmpty()) {
+                LevelChunkSection chunkSection = new LevelChunkSection(blocks, biomes);
+                chunkSection.recalcBlockCounts();
+                if (!chunkSection.hasOnlyAir()) {
                     chunkSections[yIndex] = chunkSection;
                 }
             }
 
-            if (sectionTag.contains("BlockLight", NbtElement.BYTE_ARRAY_TYPE)) {
-                blockLight[yIndex + 1] = new ChunkNibbleArray(sectionTag.getByteArray("BlockLight"));
+            if (sectionTag.contains("BlockLight", Tag.TAG_BYTE_ARRAY)) {
+                blockLight[yIndex + 1] = new DataLayer(sectionTag.getByteArray("BlockLight"));
             }
 
-            if (sectionTag.contains("SkyLight", NbtElement.BYTE_ARRAY_TYPE)) {
-                skyLight[yIndex + 1] = new ChunkNibbleArray(sectionTag.getByteArray("SkyLight"));
+            if (sectionTag.contains("SkyLight", Tag.TAG_BYTE_ARRAY)) {
+                skyLight[yIndex + 1] = new DataLayer(sectionTag.getByteArray("SkyLight"));
             }
         }
 
@@ -236,12 +236,12 @@ public class ChunkSerializer {
         // For sky light we need to compute the section based on those above it. We are going top to bottom section.
 
         // The nearest section data read from storage
-        ChunkNibbleArray fullSectionAbove = null;
+        DataLayer fullSectionAbove = null;
         // The nearest section data computed from the one above (based on its bottom-most layer).
         // May be re-used for multiple sections once computed.
-        ChunkNibbleArray inferredSection = COMPLETELY_LIT;
+        DataLayer inferredSection = COMPLETELY_LIT;
         for (int y = skyLight.length - 1; y >= 0; y--) {
-            ChunkNibbleArray section = skyLight[y];
+            DataLayer section = skyLight[y];
 
             // If we found a section, invalidate our inferred section cache and store it for later
             if (section != null) {
@@ -260,57 +260,57 @@ public class ChunkSerializer {
 
         FakeChunk chunk = new FakeChunk(world, pos, chunkSections);
 
-        NbtCompound hightmapsTag = level.getCompound("Heightmaps");
-        EnumSet<Heightmap.Type> missingHightmapTypes = EnumSet.noneOf(Heightmap.Type.class);
+        CompoundTag hightmapsTag = level.getCompound("Heightmaps");
+        EnumSet<Heightmap.Types> missingHightmapTypes = EnumSet.noneOf(Heightmap.Types.class);
 
-        for (Heightmap.Type type : chunk.getStatus().getHeightmapTypes()) {
-            String key = type.getName();
-            if (hightmapsTag.contains(key, NbtElement.LONG_ARRAY_TYPE)) {
+        for (Heightmap.Types type : chunk.getPersistedStatus().heightmapsAfter()) {
+            String key = type.getSerializationKey();
+            if (hightmapsTag.contains(key, Tag.TAG_LONG_ARRAY)) {
                 chunk.setHeightmap(type, hightmapsTag.getLongArray(key));
             } else {
                 missingHightmapTypes.add(type);
             }
         }
 
-        Heightmap.populateHeightmaps(chunk, missingHightmapTypes);
+        Heightmap.primeHeightmaps(chunk, missingHightmapTypes);
 
         if (!config.isNoBlockEntities()) {
-            NbtList blockEntitiesTag = level.getList("block_entities", NbtElement.COMPOUND_TYPE);
+            ListTag blockEntitiesTag = level.getList("block_entities", Tag.TAG_COMPOUND);
             for (int i = 0; i < blockEntitiesTag.size(); i++) {
-                chunk.addPendingBlockEntityNbt(blockEntitiesTag.getCompound(i));
+                chunk.setBlockEntityNbt(blockEntitiesTag.getCompound(i));
             }
         }
 
         return Pair.of(chunk, loadChunk(chunk, blockLight, skyLight, config));
     }
 
-    private static Supplier<WorldChunk> loadChunk(
+    private static Supplier<LevelChunk> loadChunk(
             FakeChunk chunk,
-            ChunkNibbleArray[] blockLight,
-            ChunkNibbleArray[] skyLight,
+            DataLayer[] blockLight,
+            DataLayer[] skyLight,
             BobbyConfig config
     ) {
         return () -> {
             ChunkPos pos = chunk.getPos();
-            World world = chunk.getWorld();
-            ChunkSection[] chunkSections = chunk.getSectionArray();
+            Level world = chunk.getLevel();
+            LevelChunkSection[] chunkSections = chunk.getSections();
 
-            boolean hasSkyLight = world.getDimension().hasSkyLight();
-            ChunkManager chunkManager = world.getChunkManager();
-            LightingProvider lightingProvider = chunkManager.getLightingProvider();
+            boolean hasSkyLight = world.dimensionType().hasSkyLight();
+            ChunkSource chunkManager = world.getChunkSource();
+            LevelLightEngine lightingProvider = chunkManager.getLightEngine();
             LightingProviderExt lightingProviderExt = LightingProviderExt.get(lightingProvider);
-            ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.get(LightType.BLOCK));
-            ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.get(LightType.SKY));
+            ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
+            ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
 
             lightingProviderExt.bobby_enabledColumn(pos.toLong());
 
             for (int i = -1; i < chunkSections.length + 1; i++) {
-                int y = world.sectionIndexToCoord(i);
+                int y = world.getSectionYFromSectionIndex(i);
                 if (blockLightProvider != null) {
-                    blockLightProvider.bobby_addSectionData(ChunkSectionPos.from(pos, y).asLong(), blockLight[i + 1]);
+                    blockLightProvider.bobby_addSectionData(SectionPos.of(pos, y).asLong(), blockLight[i + 1]);
                 }
                 if (skyLightProvider != null && hasSkyLight) {
-                    skyLightProvider.bobby_addSectionData(ChunkSectionPos.from(pos, y).asLong(), skyLight[i + 1]);
+                    skyLightProvider.bobby_addSectionData(SectionPos.of(pos, y).asLong(), skyLight[i + 1]);
                 }
             }
 
@@ -322,7 +322,7 @@ public class ChunkSerializer {
             // even in vanilla, e.g. if a block entity is removed while it is accessed, but apparently no one at Mojang
             // has run into that so far). To work around this, we force all block entities to be initialized
             // immediately, before any other code gets access to the chunk.
-            for (BlockPos blockPos : chunk.getBlockEntityPositions()) {
+            for (BlockPos blockPos : chunk.getBlockEntitiesPos()) {
                 chunk.getBlockEntity(blockPos);
             }
 
@@ -334,37 +334,37 @@ public class ChunkSerializer {
     // that can be called after the chunk has been unloaded to load a fake chunk in its place.
     // It also returns a fake chunk immediately that isn't loaded into the game (yet) but can safely
     // be serialized on another thread.
-    public static Pair<WorldChunk, Supplier<WorldChunk>> shallowCopy(WorldChunk original) {
+    public static Pair<LevelChunk, Supplier<LevelChunk>> shallowCopy(LevelChunk original) {
         BobbyConfig config = Bobby.getInstance().getConfig();
 
-        World world = original.getWorld();
+        Level world = original.getLevel();
         ChunkPos chunkPos = original.getPos();
 
-        ChunkSection[] chunkSections = original.getSectionArray();
+        LevelChunkSection[] chunkSections = original.getSections();
 
-        ChunkNibbleArray[] blockLight = new ChunkNibbleArray[chunkSections.length + 2];
-        ChunkNibbleArray[] skyLight = new ChunkNibbleArray[chunkSections.length + 2];
-        LightingProvider lightingProvider = world.getChunkManager().getLightingProvider();
-        LightData initialLightData = WorldChunkExt.get(original).bobby_getInitialLightData();
+        DataLayer[] blockLight = new DataLayer[chunkSections.length + 2];
+        DataLayer[] skyLight = new DataLayer[chunkSections.length + 2];
+        LevelLightEngine lightingProvider = world.getChunkSource().getLightEngine();
+        ClientboundLightUpdatePacketData initialLightData = WorldChunkExt.get(original).bobby_getInitialLightData();
         if (initialLightData != null) {
-            Iterator<byte[]> blockNibbles = initialLightData.getBlockNibbles().iterator();
-            Iterator<byte[]> skyNibbles = initialLightData.getSkyNibbles().iterator();
-            for (int y = lightingProvider.getBottomY(), i = 0; y < lightingProvider.getTopY(); y++, i++) {
-                boolean hasBlockData = initialLightData.getInitedBlock().get(i);
-                boolean isBlockZero = initialLightData.getUninitedBlock().get(i);
+            Iterator<byte[]> blockNibbles = initialLightData.getBlockUpdates().iterator();
+            Iterator<byte[]> skyNibbles = initialLightData.getSkyUpdates().iterator();
+            for (int y = lightingProvider.getMinLightSection(), i = 0; y < lightingProvider.getMaxLightSection(); y++, i++) {
+                boolean hasBlockData = initialLightData.getBlockYMask().get(i);
+                boolean isBlockZero = initialLightData.getEmptyBlockYMask().get(i);
                 if (hasBlockData || isBlockZero) {
-                    blockLight[i] = hasBlockData ? new ChunkNibbleArray(blockNibbles.next().clone()) : new ChunkNibbleArray();
+                    blockLight[i] = hasBlockData ? new DataLayer(blockNibbles.next().clone()) : new DataLayer();
                 }
-                boolean hasSkyData = initialLightData.getInitedSky().get(i);
-                boolean isSkyZero = initialLightData.getUninitedSky().get(i);
+                boolean hasSkyData = initialLightData.getSkyYMask().get(i);
+                boolean isSkyZero = initialLightData.getEmptySkyYMask().get(i);
                 if (hasSkyData || isSkyZero) {
-                    skyLight[i] = hasSkyData ? new ChunkNibbleArray(skyNibbles.next().clone()) : new ChunkNibbleArray();
+                    skyLight[i] = hasSkyData ? new DataLayer(skyNibbles.next().clone()) : new DataLayer();
                 }
             }
         } else {
-            for (int y = lightingProvider.getBottomY(), i = 0; y < lightingProvider.getTopY(); y++, i++) {
-                blockLight[i] = lightingProvider.get(LightType.BLOCK).getLightSection(ChunkSectionPos.from(chunkPos, y));
-                skyLight[i] = lightingProvider.get(LightType.SKY).getLightSection(ChunkSectionPos.from(chunkPos, y));
+            for (int y = lightingProvider.getMinLightSection(), i = 0; y < lightingProvider.getMaxLightSection(); y++, i++) {
+                blockLight[i] = lightingProvider.getLayerListener(LightLayer.BLOCK).getDataLayerData(SectionPos.of(chunkPos, y));
+                skyLight[i] = lightingProvider.getLayerListener(LightLayer.SKY).getDataLayerData(SectionPos.of(chunkPos, y));
             }
         }
 
@@ -372,17 +372,17 @@ public class ChunkSerializer {
         fake.blockLight = blockLight;
         fake.skyLight = skyLight;
 
-        for (Map.Entry<Heightmap.Type, Heightmap> entry : original.getHeightmaps()) {
+        for (Map.Entry<Heightmap.Types, Heightmap> entry : original.getHeightmaps()) {
             fake.setHeightmap(entry.getKey(), entry.getValue());
         }
 
-        NbtList blockEntitiesTag = new NbtList();
-        for (BlockPos pos : original.getBlockEntityPositions()) {
-            NbtCompound blockEntityTag = original.getPackedBlockEntityNbt(pos, world.getRegistryManager());
+        ListTag blockEntitiesTag = new ListTag();
+        for (BlockPos pos : original.getBlockEntitiesPos()) {
+            CompoundTag blockEntityTag = original.getBlockEntityNbtForSaving(pos, world.registryAccess());
             if (blockEntityTag != null) {
                 blockEntitiesTag.add(blockEntityTag);
                 if (!config.isNoBlockEntities()) {
-                    fake.addPendingBlockEntityNbt(blockEntityTag);
+                    fake.setBlockEntityNbt(blockEntityTag);
                 }
             }
         }
@@ -391,11 +391,11 @@ public class ChunkSerializer {
         return Pair.of(fake, loadChunk(fake, blockLight, skyLight, config));
     }
 
-    private static ChunkNibbleArray floodSkylightFromAbove(ChunkNibbleArray above) {
-        if (above.isUninitialized()) {
-            return new ChunkNibbleArray();
+    private static DataLayer floodSkylightFromAbove(DataLayer above) {
+        if (above.isEmpty()) {
+            return new DataLayer();
         } else {
-            byte[] aboveBytes = above.asByteArray();
+            byte[] aboveBytes = above.getData();
             byte[] belowBytes = new byte[2048];
 
             // Copy the bottom-most slice from above, 16 time over
@@ -403,7 +403,7 @@ public class ChunkSerializer {
                 System.arraycopy(aboveBytes, 0, belowBytes, i * 128, 128);
             }
 
-            return new ChunkNibbleArray(belowBytes);
+            return new DataLayer(belowBytes);
         }
     }
 
@@ -421,8 +421,8 @@ public class ChunkSerializer {
      * Returns 1 if the chunk does not contain enough entropy to reliably match against other chunks (e.g. flat world
      * chunk without any notable structure).
      */
-    public static long fingerprint(WorldChunk chunk) {
-        ChunkSection[] sectionArray = chunk.getSectionArray();
+    public static long fingerprint(LevelChunk chunk) {
+        LevelChunkSection[] sectionArray = chunk.getSections();
 
         BitSet opaqueBlocks = new BitSet(sectionArray.length * 16 * 16 * 16);
 
@@ -431,19 +431,19 @@ public class ChunkSerializer {
         boolean lowQuality = true;
 
         int i = 0;
-        for (ChunkSection chunkSection : sectionArray) {
+        for (LevelChunkSection chunkSection : sectionArray) {
             if (chunkSection == null) {
                 i += 16 * 16 * 16;
                 continue;
             }
-            PalettedContainer<BlockState> container = chunkSection.getBlockStateContainer();
+            PalettedContainer<BlockState> container = chunkSection.getStates();
             for (int y = 0; y < 16; y++) {
                 int opaqueCount = 0;
 
                 for (int z = 0; z < 16; z++) {
                     for (int x = 0; x < 16; x++) {
                         BlockState blockState = container.get(x, y, z);
-                        if (blockState.isOpaque()) {
+                        if (blockState.canOcclude()) {
                             opaqueBlocks.set(i);
                             opaqueCount++;
                         }

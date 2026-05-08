@@ -4,18 +4,18 @@ import com.mojang.serialization.MapCodec;
 import de.johni0702.minecraft.bobby.util.RegionPos;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import net.minecraft.SharedConstants;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.World;
-import net.minecraft.world.gen.chunk.ChunkGenerator;
-import net.minecraft.world.gen.chunk.FlatChunkGenerator;
-import net.minecraft.world.storage.StorageIoWorker;
-import net.minecraft.world.storage.StorageKey;
-import net.minecraft.world.storage.VersionedChunkStorage;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.storage.ChunkStorage;
+import net.minecraft.world.level.chunk.storage.IOWorker;
+import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
+import net.minecraft.world.level.levelgen.FlatLevelSource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class FakeChunkStorage extends VersionedChunkStorage {
+public class FakeChunkStorage extends ChunkStorage {
     private static final Logger LOGGER = LogManager.getLogger();
     private static final Map<Path, FakeChunkStorage> active = new HashMap<>();
 
@@ -73,9 +73,9 @@ public class FakeChunkStorage extends VersionedChunkStorage {
 
     private FakeChunkStorage(Path directory, boolean writeable) {
         super(
-                new StorageKey("dummy", World.OVERWORLD, "bobby"),
+                new RegionStorageInfo("dummy", Level.OVERWORLD, "bobby"),
                 directory,
-                MinecraftClient.getInstance().getDataFixer(),
+                Minecraft.getInstance().getFixerUpper(),
                 false
         );
 
@@ -103,8 +103,8 @@ public class FakeChunkStorage extends VersionedChunkStorage {
             int deleteUnusedRegionsAfterDays = Bobby.getInstance().getConfig().getDeleteUnusedRegionsAfterDays();
             if (deleteUnusedRegionsAfterDays >= 0) {
                 for (long entry : lastAccess.pollRegionsOlderThan(deleteUnusedRegionsAfterDays)) {
-                    int x = ChunkPos.getPackedX(entry);
-                    int z = ChunkPos.getPackedZ(entry);
+                    int x = ChunkPos.getX(entry);
+                    int z = ChunkPos.getZ(entry);
                     Files.deleteIfExists(directory.resolve("r." + x + "." + z + ".mca"));
                 }
             }
@@ -113,27 +113,27 @@ public class FakeChunkStorage extends VersionedChunkStorage {
         }
     }
 
-    public void save(ChunkPos pos, NbtCompound chunk) {
+    public void save(ChunkPos pos, CompoundTag chunk) {
         if (lastAccess != null) {
             lastAccess.touchRegion(pos.getRegionX(), pos.getRegionZ());
         }
-        setNbt(pos, chunk);
+        write(pos, chunk);
     }
 
-    public CompletableFuture<Optional<NbtCompound>> loadTag(ChunkPos pos) {
-        return getNbt(pos).thenApply(maybeNbt -> maybeNbt.map(nbt -> loadTag(pos, nbt)));
+    public CompletableFuture<Optional<CompoundTag>> loadTag(ChunkPos pos) {
+        return read(pos).thenApply(maybeNbt -> maybeNbt.map(nbt -> loadTag(pos, nbt)));
     }
 
-    private NbtCompound loadTag(ChunkPos pos, NbtCompound nbt) {
+    private CompoundTag loadTag(ChunkPos pos, CompoundTag nbt) {
         if (nbt != null && lastAccess != null) {
             lastAccess.touchRegion(pos.getRegionX(), pos.getRegionZ());
         }
-        if (nbt != null && nbt.getInt("DataVersion") != SharedConstants.getGameVersion().getSaveVersion().getId()) {
+        if (nbt != null && nbt.getInt("DataVersion") != SharedConstants.getCurrentVersion().getDataVersion().getVersion()) {
             if (sentUpgradeNotification.compareAndSet(false, true)) {
-                MinecraftClient client = MinecraftClient.getInstance();
+                Minecraft client = Minecraft.getInstance();
                 client.submit(() -> {
-                    Text text = Text.translatable(writeable ? "bobby.upgrade.required" : "bobby.upgrade.fallback_world");
-                    client.submit(() -> client.inGameHud.getChatHud().addMessage(text));
+                    Component text = Component.translatable(writeable ? "bobby.upgrade.required" : "bobby.upgrade.fallback_world");
+                    client.submit(() -> client.gui.getChat().addMessage(text));
                 });
             }
             return null;
@@ -153,9 +153,9 @@ public class FakeChunkStorage extends VersionedChunkStorage {
         }
     }
 
-    public void upgrade(RegistryKey<World> worldKey, BiConsumer<Integer, Integer> progress) throws IOException {
-        Optional<RegistryKey<MapCodec<? extends ChunkGenerator>>> generatorKey =
-                Optional.of(Registries.CHUNK_GENERATOR.getKey(FlatChunkGenerator.CODEC).orElseThrow());
+    public void upgrade(ResourceKey<Level> worldKey, BiConsumer<Integer, Integer> progress) throws IOException {
+        Optional<ResourceKey<MapCodec<? extends ChunkGenerator>>> generatorKey =
+                Optional.of(BuiltInRegistries.CHUNK_GENERATOR.getResourceKey(FlatLevelSource.CODEC).orElseThrow());
 
         List<ChunkPos> chunks = getRegions(directory).stream().flatMap(RegionPos::getContainedChunks).toList();
 
@@ -163,7 +163,7 @@ public class FakeChunkStorage extends VersionedChunkStorage {
         AtomicInteger total = new AtomicInteger(chunks.size());
         progress.accept(done.get(), total.get());
 
-        StorageIoWorker io = (StorageIoWorker) getWorker();
+        IOWorker io = (IOWorker) chunkScanner();
 
         // We ideally split the actual work of upgrading the chunk NBT across multiple threads, leaving a few for MC
         int workThreads = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
@@ -172,9 +172,9 @@ public class FakeChunkStorage extends VersionedChunkStorage {
         try {
             for (ChunkPos chunkPos : chunks) {
                 workExecutor.submit(() -> {
-                    NbtCompound nbt;
+                    CompoundTag nbt;
                     try {
-                        nbt = io.readChunkData(chunkPos).join().orElse(null);
+                        nbt = io.loadAsync(chunkPos).join().orElse(null);
                     } catch (CompletionException e) {
                         LOGGER.warn("Error reading chunk " + chunkPos.x + "/" + chunkPos.z + ":", e);
                         nbt = null;
@@ -189,9 +189,9 @@ public class FakeChunkStorage extends VersionedChunkStorage {
                     // from chunks that don't have this set, so we need to set it before we upgrade the chunk.
                     nbt.putBoolean("isLightOn", true);
 
-                    nbt = updateChunkNbt(worldKey, null, nbt, generatorKey);
+                    nbt = upgradeChunkTag(worldKey, null, nbt, generatorKey);
 
-                    io.setResult(chunkPos, nbt).join();
+                    io.store(chunkPos, nbt).join();
 
                     progress.accept(done.incrementAndGet(), total.get());
                 });

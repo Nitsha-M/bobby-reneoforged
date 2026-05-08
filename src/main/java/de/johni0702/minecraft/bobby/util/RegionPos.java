@@ -1,8 +1,7 @@
 package de.johni0702.minecraft.bobby.util;
 
-import net.minecraft.util.math.ChunkPos;
-
 import java.util.stream.Stream;
+import net.minecraft.world.level.ChunkPos;
 
 public record RegionPos(int x, int z) {
     public Stream<ChunkPos> getContainedChunks() {

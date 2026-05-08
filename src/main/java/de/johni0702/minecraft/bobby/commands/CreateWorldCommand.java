@@ -5,25 +5,26 @@ import com.mojang.brigadier.context.CommandContext;
 import de.johni0702.minecraft.bobby.FakeChunkManager;
 import de.johni0702.minecraft.bobby.Worlds;
 import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.text.Text;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.network.chat.Component;
 
-public class CreateWorldCommand implements Command<FabricClientCommandSource> {
+public class CreateWorldCommand implements Command<CommandSourceStack> {
     @Override
-    public int run(CommandContext<FabricClientCommandSource> context) {
-        FabricClientCommandSource source = context.getSource();
-        ClientWorld world = source.getWorld();
+    public int run(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        ClientLevel world = Minecraft.getInstance().level;
 
-        FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkManager()).bobby_getFakeChunkManager();
+        FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource()).bobby_getFakeChunkManager();
         if (bobbyChunkManager == null) {
-            source.sendError(Text.translatable("bobby.upgrade.not_enabled"));
+            source.sendFailure(Component.translatable("bobby.upgrade.not_enabled"));
             return 0;
         }
 
         Worlds worlds = bobbyChunkManager.getWorlds();
         if (worlds == null) {
-            source.sendError(Text.translatable("bobby.dynamic_multi_world.not_enabled"));
+            source.sendFailure(Component.translatable("bobby.dynamic_multi_world.not_enabled"));
             return 0;
         }
 

@@ -6,7 +6,7 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "de.johni0702.minecraft.bobby.MixinConfigPlugin",
   "client": [
-    "BackgroundRendererMixin",
+    "FogRendererMixin",
     "BiomeAccessAccessor",
     "ChunkLightProviderMixin",
     "ClientChunkManagerMixin",

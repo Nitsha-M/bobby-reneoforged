@@ -1,8 +1,7 @@
 package de.johni0702.minecraft.bobby;
 
-import net.minecraft.util.math.ChunkPos;
-
 import java.util.function.LongConsumer;
+import net.minecraft.world.level.ChunkPos;
 
 public class VisibleChunksTracker {
     private int centerX, centerZ, viewDistance = -1;
@@ -26,7 +25,7 @@ public class VisibleChunksTracker {
                     for (int z = oldCenterZ - oldViewDistance; z <= oldCenterZ + oldViewDistance; z++) {
                         boolean zOutsideNew = z < newCenterZ - newViewDistance || z > newCenterZ + newViewDistance;
                         if (xOutsideNew || zOutsideNew) {
-                            unload.accept(ChunkPos.toLong(x, z));
+                            unload.accept(ChunkPos.asLong(x, z));
                         }
                     }
                 }
@@ -38,7 +37,7 @@ public class VisibleChunksTracker {
                     for (int z = newCenterZ - newViewDistance; z <= newCenterZ + newViewDistance; z++) {
                         boolean zOutsideOld = z < oldCenterZ - oldViewDistance || z > oldCenterZ + oldViewDistance;
                         if (xOutsideOld || zOutsideOld) {
-                            load.accept(ChunkPos.toLong(x, z));
+                            load.accept(ChunkPos.asLong(x, z));
                         }
                     }
                 }
@@ -59,7 +58,7 @@ public class VisibleChunksTracker {
     public void forEach(LongConsumer consumer) {
         for (int x = centerX - viewDistance; x <= centerX + viewDistance; x++) {
             for (int z = centerZ - viewDistance; z <= centerZ + viewDistance; z++) {
-                consumer.accept(ChunkPos.toLong(x, z));
+                consumer.accept(ChunkPos.asLong(x, z));
             }
         }
     }

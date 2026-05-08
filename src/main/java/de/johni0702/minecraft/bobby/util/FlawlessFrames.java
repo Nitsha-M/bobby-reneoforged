@@ -1,7 +1,5 @@
 package de.johni0702.minecraft.bobby.util;
 
-import net.fabricmc.loader.api.FabricLoader;
-
 import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,19 +20,6 @@ public class FlawlessFrames {
 
     @SuppressWarnings("unchecked")
     public static void onClientInitialization() {
-        Function<String, Consumer<Boolean>> provider = name -> {
-            Object token = new Object();
-            return active -> {
-                if (active) {
-                    ACTIVE.add(token);
-                } else {
-                    ACTIVE.remove(token);
-                }
-            };
-        };
-        FabricLoader.getInstance()
-                .getEntrypoints("frex_flawless_frames", Consumer.class)
-                .forEach(api -> api.accept(provider));
     }
 
     public static boolean isActive() {

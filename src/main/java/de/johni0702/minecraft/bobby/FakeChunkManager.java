@@ -15,25 +15,6 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.network.ServerInfo;
-import net.minecraft.client.world.ClientChunkManager;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.nbt.NbtCompound;
-import net.minecraft.registry.RegistryKey;
-import net.minecraft.server.integrated.IntegratedServer;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.Util;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.ChunkSectionPos;
-import net.minecraft.world.LightType;
-import net.minecraft.world.World;
-import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.chunk.light.LightingProvider;
-import net.minecraft.world.level.storage.LevelStorage;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.nio.file.Files;
@@ -53,20 +34,39 @@ import java.util.concurrent.Executors;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientChunkCache;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.core.SectionPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.lighting.LevelLightEngine;
+import net.minecraft.world.level.storage.LevelStorageSource;
 
 public class FakeChunkManager {
     private static final String FALLBACK_LEVEL_NAME = "bobby-fallback";
-    private static final MinecraftClient client = MinecraftClient.getInstance();
+    private static final Minecraft client = Minecraft.getInstance();
 
-    private final ClientWorld world;
-    private final ClientChunkManager clientChunkManager;
+    private final ClientLevel world;
+    private final ClientChunkCache clientChunkManager;
     private final ClientChunkManagerExt clientChunkManagerExt;
     private final Worlds worlds;
     private final FakeChunkStorage storage;
-    private final List<Function<ChunkPos, CompletableFuture<Optional<NbtCompound>>>> storages = new ArrayList<>();
+    private final List<Function<ChunkPos, CompletableFuture<Optional<CompoundTag>>>> storages = new ArrayList<>();
     private int ticksSinceLastSave;
 
-    private final Long2ObjectMap<WorldChunk> fakeChunks = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
+    private final Long2ObjectMap<LevelChunk> fakeChunks = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
     private final VisibleChunksTracker chunkTracker = new VisibleChunksTracker();
     private final Long2LongMap toBeUnloaded = new Long2LongOpenHashMap();
     // Contains chunks in order to be unloaded. We keep the chunk and time so we can cross-reference it with
@@ -87,7 +87,7 @@ public class FakeChunkManager {
 
     private final Long2ObjectMap<FingerprintJob> fingerprintJobs = new Long2ObjectLinkedOpenHashMap<>();
 
-    public FakeChunkManager(ClientWorld world, ClientChunkManager clientChunkManager) {
+    public FakeChunkManager(ClientLevel world, ClientChunkCache clientChunkManager) {
         this.world = world;
         this.clientChunkManager = clientChunkManager;
         this.clientChunkManagerExt = (ClientChunkManagerExt) clientChunkManager;
@@ -95,10 +95,10 @@ public class FakeChunkManager {
         BobbyConfig config = Bobby.getInstance().getConfig();
 
         String serverName = getCurrentWorldOrServerName(((ClientWorldAccessor) world).getNetworkHandler());
-        long seedHash = ((BiomeAccessAccessor) world.getBiomeAccess()).getSeed();
-        RegistryKey<World> worldKey = world.getRegistryKey();
-        Identifier worldId = worldKey.getValue();
-        Path storagePath = client.runDirectory
+        long seedHash = ((BiomeAccessAccessor) world.getBiomeManager()).getBiomeZoomSeed();
+        ResourceKey<Level> worldKey = world.dimension();
+        ResourceLocation worldId = worldKey.location();
+        Path storagePath = client.gameDirectory
                 .toPath()
                 .resolve(".bobby");
         if (oldFolderExists(storagePath, serverName)) {
@@ -124,10 +124,10 @@ public class FakeChunkManager {
             worlds = null;
         }
 
-        LevelStorage levelStorage = client.getLevelStorage();
+        LevelStorageSource levelStorage = client.getLevelSource();
         if (levelStorage.levelExists(FALLBACK_LEVEL_NAME)) {
-            try (LevelStorage.Session session = levelStorage.createSession(FALLBACK_LEVEL_NAME)) {
-                Path worldDirectory = session.getWorldDirectory(worldKey);
+            try (LevelStorageSource.LevelStorageAccess session = levelStorage.validateAndCreateAccess(FALLBACK_LEVEL_NAME)) {
+                Path worldDirectory = session.getDimensionPath(worldKey);
                 Path regionDirectory = worldDirectory.resolve("region");
                 FakeChunkStorage fallbackStorage = FakeChunkStorage.getFor(regionDirectory, false);
                 storages.add(fallbackStorage::loadTag);
@@ -145,8 +145,8 @@ public class FakeChunkManager {
         }
     }
 
-    public WorldChunk getChunk(int x, int z) {
-        return fakeChunks.get(ChunkPos.toLong(x, z));
+    public LevelChunk getChunk(int x, int z) {
+        return fakeChunks.get(ChunkPos.asLong(x, z));
     }
 
     public FakeChunkStorage getStorage() {
@@ -158,28 +158,28 @@ public class FakeChunkManager {
     }
 
     public void update(boolean blocking, BooleanSupplier shouldKeepTicking) {
-        update(blocking, shouldKeepTicking, client.options.getViewDistance().getValue());
+        update(blocking, shouldKeepTicking, client.options.renderDistance().get());
     }
 
     private void update(boolean blocking, BooleanSupplier shouldKeepTicking, int newViewDistance) {
         // Once a minute, force chunks to disk
         if (++ticksSinceLastSave > 20 * 60) {
             // completeAll is blocking, so we run it on the io pool
-            Util.getIoWorkerExecutor().execute(worlds != null ? worlds::saveAll : storage::completeAll);
+            Util.ioPool().execute(worlds != null ? worlds::saveAll : storage::flushWorker);
 
             ticksSinceLastSave = 0;
         }
 
-        ClientPlayerEntity player = client.player;
+        LocalPlayer player = client.player;
         if (player == null) {
             return;
         }
 
         BobbyConfig config = Bobby.getInstance().getConfig();
-        long time = Util.getMeasuringTimeMs();
+        long time = Util.getMillis();
 
         List<LoadingJob> newJobs = new ArrayList<>();
-        ChunkPos playerChunkPos = player.getChunkPos();
+        ChunkPos playerChunkPos = player.chunkPosition();
         int newCenterX =  playerChunkPos.x;
         int newCenterZ = playerChunkPos.z;
         chunkTracker.update(newCenterX, newCenterZ, newViewDistance, chunkPos -> {
@@ -189,8 +189,8 @@ public class FakeChunkManager {
             unloadQueue.add(Pair.of(chunkPos, time));
         }, chunkPos -> {
             // Chunk is now inside view distance, load it
-            int x = ChunkPos.getPackedX(chunkPos);
-            int z = ChunkPos.getPackedZ(chunkPos);
+            int x = ChunkPos.getX(chunkPos);
+            int z = ChunkPos.getZ(chunkPos);
 
             // We want this chunk, so don't unload it if it's still here
             toBeUnloaded.remove(chunkPos);
@@ -211,7 +211,7 @@ public class FakeChunkManager {
         if (!newJobs.isEmpty()) {
             newJobs.sort(LoadingJob.BY_DISTANCE);
             newJobs.forEach(job -> {
-                loadingJobs.put(ChunkPos.toLong(job.x, job.z), job);
+                loadingJobs.put(ChunkPos.asLong(job.x, job.z), job);
                 loadExecutor.execute(job);
             });
         }
@@ -246,7 +246,7 @@ public class FakeChunkManager {
             }
 
             // This chunk is due for unloading
-            unload(ChunkPos.getPackedX(chunkPos), ChunkPos.getPackedZ(chunkPos), false);
+            unload(ChunkPos.getX(chunkPos), ChunkPos.getZ(chunkPos), false);
 
             if (countSinceLastThrottleCheck++ > 10) {
                 countSinceLastThrottleCheck = 0;
@@ -343,11 +343,11 @@ public class FakeChunkManager {
         return chunkTracker.isInViewDistance(x, z);
     }
 
-    private CompletableFuture<Optional<NbtCompound>> loadTag(int x, int z) {
+    private CompletableFuture<Optional<CompoundTag>> loadTag(int x, int z) {
         return loadTag(new ChunkPos(x, z), 0);
     }
 
-    private CompletableFuture<Optional<NbtCompound>> loadTag(ChunkPos chunkPos, int storageIndex) {
+    private CompletableFuture<Optional<CompoundTag>> loadTag(ChunkPos chunkPos, int storageIndex) {
         return storages.get(storageIndex).apply(chunkPos).thenCompose(maybeTag -> {
             if (maybeTag.isPresent()) {
                 return CompletableFuture.completedFuture(maybeTag);
@@ -359,46 +359,46 @@ public class FakeChunkManager {
         });
     }
 
-    public void load(int x, int z, WorldChunk chunk) {
-        fakeChunks.put(ChunkPos.toLong(x, z), chunk);
+    public void load(int x, int z, LevelChunk chunk) {
+        fakeChunks.put(ChunkPos.asLong(x, z), chunk);
 
-        world.resetChunkColor(new ChunkPos(x, z));
+        world.onChunkLoaded(new ChunkPos(x, z));
 
-        for (int i = world.getBottomSectionCoord(); i < world.getTopSectionCoord(); i++) {
-            world.scheduleBlockRenders(x, i, z);
+        for (int i = world.getMinSection(); i < world.getMaxSection(); i++) {
+            world.setSectionDirtyWithNeighbors(x, i, z);
         }
 
         clientChunkManagerExt.bobby_onFakeChunkAdded(x, z);
     }
 
     public boolean unload(int x, int z, boolean willBeReplaced) {
-        long chunkPos = ChunkPos.toLong(x, z);
+        long chunkPos = ChunkPos.asLong(x, z);
         cancelLoad(chunkPos);
-        WorldChunk chunk = fakeChunks.remove(chunkPos);
+        LevelChunk chunk = fakeChunks.remove(chunkPos);
         if (chunk != null) {
-            chunk.clear();
+            chunk.clearAllBlockEntities();
 
-            LightingProvider lightingProvider = clientChunkManager.getLightingProvider();
+            LevelLightEngine lightingProvider = clientChunkManager.getLightEngine();
             LightingProviderExt lightingProviderExt = LightingProviderExt.get(lightingProvider);
-            ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.get(LightType.BLOCK));
-            ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.get(LightType.SKY));
+            ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
+            ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
 
             lightingProviderExt.bobby_disableColumn(chunkPos);
 
             // See the comment above the bobby_queueUnloadFakeLightDataTask implementation
             Runnable unloadLightData = () -> {
-                for (int i = 0; i < chunk.getSectionArray().length; i++) {
-                    int y = world.sectionIndexToCoord(i);
+                for (int i = 0; i < chunk.getSections().length; i++) {
+                    int y = world.getSectionYFromSectionIndex(i);
                     if (blockLightProvider != null) {
-                        blockLightProvider.bobby_removeSectionData(ChunkSectionPos.asLong(x, y, z));
+                        blockLightProvider.bobby_removeSectionData(SectionPos.asLong(x, y, z));
                     }
                     if (skyLightProvider != null) {
-                        skyLightProvider.bobby_removeSectionData(ChunkSectionPos.asLong(x, y, z));
+                        skyLightProvider.bobby_removeSectionData(SectionPos.asLong(x, y, z));
                     }
                 }
             };
             if (willBeReplaced) {
-                ClientPlayNetworkHandler networkHandler = ((ClientWorldAccessor) world).getNetworkHandler();
+                ClientPacketListener networkHandler = ((ClientWorldAccessor) world).getNetworkHandler();
                 ClientPlayNetworkHandlerExt.get(networkHandler).bobby_queueUnloadFakeLightDataTask(() -> {
                     if (fakeChunks.containsKey(chunkPos)) {
                         // Real chunk has been unloaded in the meantime and is now a fake chunk again, that fake
@@ -425,20 +425,20 @@ public class FakeChunkManager {
         }
     }
 
-    public Supplier<WorldChunk> save(WorldChunk chunk) {
-        Pair<WorldChunk, Supplier<WorldChunk>> copy = ChunkSerializer.shallowCopy(chunk);
+    public Supplier<LevelChunk> save(LevelChunk chunk) {
+        Pair<LevelChunk, Supplier<LevelChunk>> copy = ChunkSerializer.shallowCopy(chunk);
         fingerprint(copy.getLeft());
-        LightingProvider lightingProvider = chunk.getWorld().getLightingProvider();
+        LevelLightEngine lightingProvider = chunk.getLevel().getLightEngine();
         FakeChunkStorage storage = worlds != null ? worlds.getCurrentStorage() : this.storage;
         saveExecutor.execute(() -> {
-            NbtCompound nbt = ChunkSerializer.serialize(copy.getLeft(), lightingProvider);
+            CompoundTag nbt = ChunkSerializer.serialize(copy.getLeft(), lightingProvider);
             nbt.putLong("age", System.currentTimeMillis()); // fallback in case meta gets corrupted
             storage.save(chunk.getPos(), nbt);
         });
         return copy.getRight();
     }
 
-    public void fingerprint(WorldChunk chunk) {
+    public void fingerprint(LevelChunk chunk) {
         if (worlds == null) {
             return;
         }
@@ -452,21 +452,21 @@ public class FakeChunkManager {
 
         job = new FingerprintJob(chunk);
         fingerprintJobs.put(chunkCoord, job);
-        Util.getMainWorkerExecutor().execute(job);
+        Util.backgroundExecutor().execute(job);
     }
 
-    private static String getCurrentWorldOrServerName(ClientPlayNetworkHandler networkHandler) {
-        IntegratedServer integratedServer = client.getServer();
+    private static String getCurrentWorldOrServerName(ClientPacketListener networkHandler) {
+        IntegratedServer integratedServer = client.getSingleplayerServer();
         if (integratedServer != null) {
-            return integratedServer.getSaveProperties().getLevelName();
+            return integratedServer.getWorldData().getLevelName();
         }
 
-        ServerInfo serverInfo = networkHandler.getServerInfo();
+        ServerData serverInfo = networkHandler.getServerData();
         if (serverInfo != null) {
             if (serverInfo.isRealm()) {
                 return "realms";
             }
-            return serverInfo.address.replace(':', '_');
+            return serverInfo.ip.replace(':', '_');
         }
 
         return "unknown";
@@ -476,7 +476,7 @@ public class FakeChunkManager {
         return "F: " + fakeChunks.size() + " L: " + loadingJobs.size() + " U: " + toBeUnloaded.size() + " C: " + fingerprintJobs.size();
     }
 
-    public Collection<WorldChunk> getFakeChunks() {
+    public Collection<LevelChunk> getFakeChunks() {
         return fakeChunks.values();
     }
 
@@ -486,7 +486,7 @@ public class FakeChunkManager {
         private final int distanceSquared;
         private volatile boolean cancelled;
         @SuppressWarnings("OptionalUsedAsFieldOrParameterType") // null while loading, empty() if no chunk was found
-        private volatile Optional<Supplier<WorldChunk>> result;
+        private volatile Optional<Supplier<LevelChunk>> result;
 
         public LoadingJob(int x, int z, int distanceSquared) {
             this.x = x;
@@ -499,7 +499,7 @@ public class FakeChunkManager {
             if (cancelled) {
                 return;
             }
-            Optional<NbtCompound> value;
+            Optional<CompoundTag> value;
             try {
                 value = loadTag(x, z).get();
             } catch (InterruptedException | ExecutionException e) {
@@ -520,11 +520,11 @@ public class FakeChunkManager {
     }
 
     private static class FingerprintJob implements Runnable {
-        private final WorldChunk chunk;
+        private final LevelChunk chunk;
         private volatile boolean cancelled;
         private volatile long result;
 
-        private FingerprintJob(WorldChunk chunk) {
+        private FingerprintJob(LevelChunk chunk) {
             this.chunk = chunk;
         }
 

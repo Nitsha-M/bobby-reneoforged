@@ -4,25 +4,25 @@ import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkSectionPos;
-import net.minecraft.world.chunk.ChunkNibbleArray;
-import net.minecraft.world.chunk.light.ChunkLightProvider;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.lighting.LightEngine;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@Mixin(value = ChunkLightProvider.class, targets = {
+@Mixin(value = LightEngine.class, targets = {
         "ca.spottedleaf.starlight.common.light.StarLightInterface$1",
         "ca.spottedleaf.starlight.common.light.StarLightInterface$2"
 })
 public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
-    private final Long2ObjectMap<ChunkNibbleArray> bobbySectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
-    private final Long2ObjectMap<ChunkNibbleArray> bobbyOriginalSectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
+    private final Long2ObjectMap<DataLayer> bobbySectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
+    private final Long2ObjectMap<DataLayer> bobbyOriginalSectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
 
     @Override
-    public void bobby_addSectionData(long pos, ChunkNibbleArray data) {
+    public void bobby_addSectionData(long pos, DataLayer data) {
         this.bobbySectionData.put(pos, data);
         this.bobbyOriginalSectionData.remove(pos);
     }
@@ -36,7 +36,7 @@ public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
     @Override
     public void bobby_setTainted(long pos, int delta) {
         if (delta != 0) {
-            ChunkNibbleArray original = this.bobbyOriginalSectionData.get(pos);
+            DataLayer original = this.bobbyOriginalSectionData.get(pos);
             if (original == null) {
                 original = this.bobbySectionData.get(pos);
                 if (original == null) {
@@ -45,7 +45,7 @@ public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
                 this.bobbyOriginalSectionData.put(pos, original);
             }
 
-            ChunkNibbleArray updated = new ChunkNibbleArray();
+            DataLayer updated = new DataLayer();
 
             for (int y = 0; y < 16; y++) {
                 for (int z = 0; z < 16; z++) {
@@ -57,7 +57,7 @@ public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
 
             this.bobbySectionData.put(pos, updated);
         } else {
-            ChunkNibbleArray original = this.bobbyOriginalSectionData.remove(pos);
+            DataLayer original = this.bobbyOriginalSectionData.remove(pos);
             if (original == null) {
                 return;
             }
@@ -66,8 +66,8 @@ public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
     }
 
     @Inject(method = "getLightSection(Lnet/minecraft/util/math/ChunkSectionPos;)Lnet/minecraft/world/chunk/ChunkNibbleArray;", at = @At("HEAD"), cancellable = true)
-    private void bobby_getLightSection(ChunkSectionPos pos, CallbackInfoReturnable<ChunkNibbleArray> ci) {
-        ChunkNibbleArray data = this.bobbySectionData.get(pos.asLong());
+    private void bobby_getLightSection(SectionPos pos, CallbackInfoReturnable<DataLayer> ci) {
+        DataLayer data = this.bobbySectionData.get(pos.asLong());
         if (data != null) {
             ci.setReturnValue(data);
         }
@@ -75,12 +75,12 @@ public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
 
     @Inject(method = "getLightLevel(Lnet/minecraft/util/math/BlockPos;)I", at = @At("HEAD"), cancellable = true)
     private void bobby_getLightSection(BlockPos blockPos, CallbackInfoReturnable<Integer> ci) {
-        ChunkNibbleArray data = this.bobbySectionData.get(ChunkSectionPos.from(blockPos).asLong());
+        DataLayer data = this.bobbySectionData.get(SectionPos.of(blockPos).asLong());
         if (data != null) {
             ci.setReturnValue(data.get(
-                    ChunkSectionPos.getLocalCoord(blockPos.getX()),
-                    ChunkSectionPos.getLocalCoord(blockPos.getY()),
-                    ChunkSectionPos.getLocalCoord(blockPos.getZ())
+                    SectionPos.sectionRelative(blockPos.getX()),
+                    SectionPos.sectionRelative(blockPos.getY()),
+                    SectionPos.sectionRelative(blockPos.getZ())
             ));
         }
     }

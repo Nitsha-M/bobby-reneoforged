@@ -1,33 +1,33 @@
 package de.johni0702.minecraft.bobby;
 
 import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.WorldRenderer;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.ChunkSectionPos;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.LightType;
-import net.minecraft.world.World;
-import net.minecraft.world.chunk.ChunkNibbleArray;
-import net.minecraft.world.chunk.ChunkSection;
-import net.minecraft.world.chunk.UpgradeData;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.world.chunk.light.LightingProvider;
-import net.minecraft.world.tick.ChunkTickScheduler;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.core.SectionPos;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.UpgradeData;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.lighting.LevelLightEngine;
+import net.minecraft.world.ticks.LevelChunkTicks;
 
 // Fake chunks are of this subclass, primarily so we have an easy way of identifying them.
-public class FakeChunk extends WorldChunk {
+public class FakeChunk extends LevelChunk {
 
     private boolean isTainted;
 
     // Keeping these around, so we can safely serialize the chunk from any thread
-    public ChunkNibbleArray[] blockLight;
-    public ChunkNibbleArray[] skyLight;
-    public NbtList serializedBlockEntities;
+    public DataLayer[] blockLight;
+    public DataLayer[] skyLight;
+    public ListTag serializedBlockEntities;
 
-    public FakeChunk(World world, ChunkPos pos, ChunkSection[] sections) {
-        super(world, pos, UpgradeData.NO_UPGRADE_DATA, new ChunkTickScheduler<>(), new ChunkTickScheduler<>(), 0L, sections, null, null);
+    public FakeChunk(Level world, ChunkPos pos, LevelChunkSection[] sections) {
+        super(world, pos, UpgradeData.EMPTY, new LevelChunkTicks<>(), new LevelChunkTicks<>(), 0L, sections, null, null);
     }
 
     public void setTainted(boolean enabled) {
@@ -36,23 +36,23 @@ public class FakeChunk extends WorldChunk {
         }
         isTainted = enabled;
 
-        MinecraftClient client = MinecraftClient.getInstance();
-        double gamma = client.options.getGamma().getValue();
-        WorldRenderer worldRenderer = client.worldRenderer;
+        Minecraft client = Minecraft.getInstance();
+        double gamma = client.options.gamma().get();
+        LevelRenderer worldRenderer = client.levelRenderer;
 
-        LightingProvider lightingProvider = getWorld().getLightingProvider();
-        ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.get(LightType.BLOCK));
-        ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.get(LightType.SKY));
+        LevelLightEngine lightingProvider = getLevel().getLightEngine();
+        ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
+        ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
 
         int blockDelta = enabled ? 5 : 0;
         int skyDelta = enabled ? -3 + (int) (-7 * gamma) : 0;
 
         int x = getPos().x;
         int z = getPos().z;
-        for (int y = getBottomSectionCoord(); y < getTopSectionCoord(); y++) {
+        for (int y = getMinSection(); y < getMaxSection(); y++) {
             updateTaintedState(blockLightProvider, x, y, z, blockDelta);
             updateTaintedState(skyLightProvider, x, y, z, skyDelta);
-            worldRenderer.scheduleBlockRender(x, y, z);
+            worldRenderer.setSectionDirty(x, y, z);
         }
     }
 
@@ -60,10 +60,10 @@ public class FakeChunk extends WorldChunk {
         if (lightProvider == null) {
             return;
         }
-        lightProvider.bobby_setTainted(ChunkSectionPos.asLong(x, y, z), delta);
+        lightProvider.bobby_setTainted(SectionPos.asLong(x, y, z), delta);
     }
 
-    public void setHeightmap(Heightmap.Type type, Heightmap heightmap) {
+    public void setHeightmap(Heightmap.Types type, Heightmap heightmap) {
         this.heightmaps.put(type, heightmap);
     }
 }

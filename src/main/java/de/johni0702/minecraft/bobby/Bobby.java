@@ -1,6 +1,5 @@
 package de.johni0702.minecraft.bobby;
 
-import ca.stellardrift.confabricate.Confabricate;
 import de.johni0702.minecraft.bobby.commands.CreateWorldCommand;
 import de.johni0702.minecraft.bobby.commands.MergeWorldsCommand;
 import de.johni0702.minecraft.bobby.commands.UpgradeCommand;
@@ -9,15 +8,14 @@ import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
 import de.johni0702.minecraft.bobby.mixin.SimpleOptionAccessor;
 import de.johni0702.minecraft.bobby.mixin.ValidatingIntSliderCallbacksAccessor;
 import de.johni0702.minecraft.bobby.util.FlawlessFrames;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.option.SimpleOption;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.util.Util;
-import net.minecraft.world.chunk.WorldChunk;
+
+import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.OptionInstance;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.commands.Commands;
+import net.minecraft.world.level.chunk.LevelChunk;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.configurate.CommentedConfigurationNode;
@@ -35,29 +33,50 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.mojang.brigadier.arguments.IntegerArgumentType.integer;
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument;
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal;
 
-public class Bobby implements ClientModInitializer {
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.loading.FMLPaths;
+import net.neoforged.fml.ModList;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
+
+@Mod("bobby")
+public class Bobby {
     private static final Logger LOGGER = LogManager.getLogger();
 
     public static final String MOD_ID = "bobby";
-    { instance = this; }
+
     private static Bobby instance;
     public static Bobby getInstance() {
         return instance;
     }
 
-    private static final MinecraftClient client = MinecraftClient.getInstance();
+    private static final Minecraft client = Minecraft.getInstance();
 
     private ValueReference<BobbyConfig, CommentedConfigurationNode> configReference;
 
-    @Override
-    public void onInitializeClient() {
+    public Bobby(IEventBus modEventBus, ModContainer modContainer) {
+        instance = this;
+
+        modEventBus.addListener(this::onClientSetup);
+
+        NeoForge.EVENT_BUS.addListener(this::registerClientCommands);
+
+        if (ModList.get().isLoaded("cloth_config")) {
+            modContainer.registerExtensionPoint(IConfigScreenFactory.class,
+                    (minecraft, screen) -> createConfigScreen(screen));
+        }
+    }
+
+    private void onClientSetup(FMLClientSetupEvent event) {
         try {
-            Path configPath = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID + ".conf");
+            Path configPath = FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".conf");
             @SuppressWarnings("resource") // we'll keep this around for the entire lifetime of our mod
-            ConfigurationReference<CommentedConfigurationNode> rootRef = getOrCreateWatchServiceListener()
+            ConfigurationReference<CommentedConfigurationNode> rootRef = createWatchServiceListener()
                     .listenToConfiguration(path -> HoconConfigurationLoader.builder().path(path).build(), configPath);
             configReference = rootRef.referenceTo(BobbyConfig.class);
             rootRef.saveAsync();
@@ -65,24 +84,25 @@ public class Bobby implements ClientModInitializer {
             e.printStackTrace();
         }
 
-        ClientCommandRegistrationCallback.EVENT.register(((dispatcher, registryAccess) ->
-                dispatcher.register(literal("bobby")
-                        .then(literal("worlds").executes(new WorldsCommand(false))
-                                .then(literal("full").executes(new WorldsCommand(true)))
-                                .then(literal("merge")
-                                        .then(argument("source", integer())
-                                                .then(argument("target", integer())
-                                                        .executes(new MergeWorldsCommand()))))
-                                .then(literal("create").executes(new CreateWorldCommand()))
-                        )
-                        .then(literal("upgrade").executes(new UpgradeCommand())))));
-
         FlawlessFrames.onClientInitialization();
 
         configReference.subscribe(new TaintChunksConfigHandler()::update);
         configReference.subscribe(new MaxRenderDistanceConfigHandler()::update);
 
-        Util.getIoWorkerExecutor().submit(this::cleanupOldWorlds);
+        Util.ioPool().submit(this::cleanupOldWorlds);
+    }
+
+    private void registerClientCommands(RegisterClientCommandsEvent event) {
+        event.getDispatcher().register(Commands.literal("bobby")
+                .then(Commands.literal("worlds").executes(new WorldsCommand(false))
+                        .then(Commands.literal("full").executes(new WorldsCommand(true)))
+                        .then(Commands.literal("merge")
+                                .then(Commands.argument("source", integer())
+                                        .then(Commands.argument("target", integer())
+                                                .executes(new MergeWorldsCommand()))))
+                        .then(Commands.literal("create").executes(new CreateWorldCommand()))
+                )
+                .then(Commands.literal("upgrade").executes(new UpgradeCommand())));
     }
 
     public BobbyConfig getConfig() {
@@ -93,11 +113,11 @@ public class Bobby implements ClientModInitializer {
         BobbyConfig config = getConfig();
         return config.isEnabled()
                 // For singleplayer, disable ourselves unless the view-distance overwrite is active.
-                && (client.getServer() == null || config.getViewDistanceOverwrite() != 0);
+                && (client.getSingleplayerServer() == null || config.getViewDistanceOverwrite() != 0);
     }
 
     public Screen createConfigScreen(Screen parent) {
-        if (FabricLoader.getInstance().isModLoaded("cloth-config2")) {
+        if (ModList.get().isLoaded("cloth_config")) {
             return BobbyConfigScreenFactory.createConfigScreen(parent, getConfig(), configReference::setAndSaveAsync);
         }
         return null;
@@ -109,7 +129,7 @@ public class Bobby implements ClientModInitializer {
             return;
         }
 
-        Path basePath = client.runDirectory.toPath().resolve(".bobby");
+        Path basePath = client.gameDirectory.toPath().resolve(".bobby");
 
         List<Path> toBeDeleted;
         try (Stream<Path> stream = Files.walk(basePath, 4)) {
@@ -182,14 +202,6 @@ public class Bobby implements ClientModInitializer {
         deleteParentsIfEmpty(parent);
     }
 
-    private static WatchServiceListener getOrCreateWatchServiceListener() throws IOException {
-        try {
-            return Confabricate.fileWatcher();
-        } catch (NoClassDefFoundError | NoSuchMethodError ignored) {
-            return createWatchServiceListener();
-        }
-    }
-
     private static WatchServiceListener createWatchServiceListener() throws IOException {
         WatchServiceListener listener = WatchServiceListener.create();
 
@@ -217,17 +229,17 @@ public class Bobby implements ClientModInitializer {
             }
             wasEnabled = enabled;
 
-            ClientWorld world = client.world;
+            ClientLevel world = client.level;
             if (world == null) {
                 return;
             }
 
-            FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkManager()).bobby_getFakeChunkManager();
+            FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource()).bobby_getFakeChunkManager();
             if (bobbyChunkManager == null) {
                 return;
             }
 
-            for (WorldChunk fakeChunk : bobbyChunkManager.getFakeChunks()) {
+            for (LevelChunk fakeChunk : bobbyChunkManager.getFakeChunks()) {
                 ((FakeChunk) fakeChunk).setTainted(enabled);
             }
         }
@@ -255,8 +267,8 @@ public class Bobby implements ClientModInitializer {
             }
             oldMaxRenderDistance = newMaxRenderDistance;
 
-            SimpleOption<Integer> viewDistance = client.options.getViewDistance();
-            if (viewDistance.getCallbacks() instanceof SimpleOption.ValidatingIntSliderCallbacks callbacks) {
+            OptionInstance<Integer> viewDistance = client.options.renderDistance();
+            if (viewDistance.values() instanceof OptionInstance.IntRange callbacks) {
                 ValidatingIntSliderCallbacksAccessor callbacksAcc = (ValidatingIntSliderCallbacksAccessor)(Object) callbacks;
                 if (increaseOnly) {
                     callbacksAcc.setMaxInclusive(Math.max(callbacks.maxInclusive(), newMaxRenderDistance));

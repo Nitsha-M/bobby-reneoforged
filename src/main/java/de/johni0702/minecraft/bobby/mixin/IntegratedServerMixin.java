@@ -1,7 +1,7 @@
 package de.johni0702.minecraft.bobby.mixin;
 
 import de.johni0702.minecraft.bobby.Bobby;
-import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.client.server.IntegratedServer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;

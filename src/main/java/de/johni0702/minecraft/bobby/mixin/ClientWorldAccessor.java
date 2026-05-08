@@ -1,12 +1,12 @@
 package de.johni0702.minecraft.bobby.mixin;
 
-import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.world.ClientWorld;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
-@Mixin(ClientWorld.class)
+@Mixin(ClientLevel.class)
 public interface ClientWorldAccessor {
     @Accessor
-    ClientPlayNetworkHandler getNetworkHandler();
+    ClientPacketListener getNetworkHandler();
 }

@@ -6,28 +6,27 @@ import de.johni0702.minecraft.bobby.FakeChunkManager;
 import de.johni0702.minecraft.bobby.FakeChunkStorage;
 import de.johni0702.minecraft.bobby.Worlds;
 import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.text.Text;
-
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.network.chat.Component;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-public class UpgradeCommand implements Command<FabricClientCommandSource> {
+public class UpgradeCommand implements Command<CommandSourceStack> {
     @Override
-    public int run(CommandContext<FabricClientCommandSource> context) {
-        FabricClientCommandSource source = context.getSource();
-        MinecraftClient client = source.getClient();
-        ClientWorld world = source.getWorld();
+    public int run(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        Minecraft client = Minecraft.getInstance();
+        ClientLevel world = client.level;
 
-        ClientChunkManagerExt chunkManager = (ClientChunkManagerExt) world.getChunkManager();
+        ClientChunkManagerExt chunkManager = (ClientChunkManagerExt) world.getChunkSource();
         FakeChunkManager bobbyChunkManager = chunkManager.bobby_getFakeChunkManager();
         if (bobbyChunkManager == null) {
-            source.sendError(Text.translatable("bobby.upgrade.not_enabled"));
+            source.sendFailure(Component.translatable("bobby.upgrade.not_enabled"));
             return 0;
         }
 
@@ -39,15 +38,15 @@ public class UpgradeCommand implements Command<FabricClientCommandSource> {
             storages = List.of(bobbyChunkManager.getStorage());
         }
 
-        source.sendFeedback(Text.translatable("bobby.upgrade.begin"));
+        source.sendSystemMessage(Component.translatable("bobby.upgrade.begin"));
         new Thread(() -> {
             for (int i = 0; i < storages.size(); i++) {
                 FakeChunkStorage storage = storages.get(i);
                 try {
-                    storage.upgrade(world.getRegistryKey(), new ProgressReported(client, i, storages.size()));
+                    storage.upgrade(world.dimension(), new ProgressReported(client, i, storages.size()));
                 } catch (IOException e) {
                     e.printStackTrace();
-                    source.sendError(Text.of(e.getMessage()));
+                    source.sendFailure(Component.nullToEmpty(e.getMessage()));
                 }
                 if (worlds != null) {
                     worlds.markAsUpToDate(storage);
@@ -57,7 +56,7 @@ public class UpgradeCommand implements Command<FabricClientCommandSource> {
                 if (worlds != null) {
                     worlds.recheckChunks(world, chunkManager.bobby_getRealChunksTracker());
                 }
-                source.sendFeedback(Text.translatable("bobby.upgrade.done"));
+                source.sendSystemMessage(Component.translatable("bobby.upgrade.done"));
                 bobbyChunkManager.loadMissingChunksFromCache();
             });
         }, "bobby-upgrade").start();
@@ -66,14 +65,14 @@ public class UpgradeCommand implements Command<FabricClientCommandSource> {
     }
 
     private static class ProgressReported implements BiConsumer<Integer, Integer> {
-        private final MinecraftClient client;
+        private final Minecraft client;
         private final int worldIndex;
         private final int totalWorlds;
         private Instant nextReport = Instant.MIN;
         private int done;
         private int total = Integer.MAX_VALUE;
 
-        public ProgressReported(MinecraftClient client, int worldIndex, int totalWorlds) {
+        public ProgressReported(Minecraft client, int worldIndex, int totalWorlds) {
             this.client = client;
             this.worldIndex = worldIndex;
             this.totalWorlds = totalWorlds;
@@ -88,8 +87,8 @@ public class UpgradeCommand implements Command<FabricClientCommandSource> {
             if (now.isAfter(nextReport) || this.done == this.total) {
                 nextReport = now.plus(3, ChronoUnit.SECONDS);
 
-                Text text = Text.translatable("bobby.upgrade.progress", this.done, this.total, this.worldIndex + 1, this.totalWorlds);
-                client.submit(() -> client.inGameHud.getChatHud().addMessage(text));
+                Component text = Component.translatable("bobby.upgrade.progress", this.done, this.total, this.worldIndex + 1, this.totalWorlds);
+                client.submit(() -> client.gui.getChat().addMessage(text));
             }
         }
     }
