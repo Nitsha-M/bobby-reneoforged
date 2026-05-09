@@ -5,8 +5,8 @@ import com.mojang.brigadier.context.CommandContext;
 import de.johni0702.minecraft.bobby.FakeChunkManager;
 import de.johni0702.minecraft.bobby.FakeChunkStorage;
 import de.johni0702.minecraft.bobby.Worlds;
-import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.chat.Component;
@@ -16,17 +16,17 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.function.BiConsumer;
 
-public class UpgradeCommand implements Command<FabricClientCommandSource> {
+public class UpgradeCommand implements Command<CommandSourceStack> {
     @Override
-    public int run(CommandContext<FabricClientCommandSource> context) {
-        FabricClientCommandSource source = context.getSource();
-        Minecraft client = source.getClient();
-        ClientLevel world = source.getLevel();
+    public int run(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        Minecraft client = Minecraft.getInstance();
+        ClientLevel world = client.level;
 
-        ClientChunkCacheExt chunkManager = (ClientChunkCacheExt) world.getChunkSource();
+        ClientChunkManagerExt chunkManager = (ClientChunkManagerExt) world.getChunkSource();
         FakeChunkManager bobbyChunkManager = chunkManager.bobby_getFakeChunkManager();
         if (bobbyChunkManager == null) {
-            source.sendError(Component.translatable("bobby.upgrade.not_enabled"));
+            source.sendFailure(Component.translatable("bobby.upgrade.not_enabled"));
             return 0;
         }
 
@@ -38,7 +38,7 @@ public class UpgradeCommand implements Command<FabricClientCommandSource> {
             storages = List.of(bobbyChunkManager.getStorage());
         }
 
-        source.sendFeedback(Component.translatable("bobby.upgrade.begin"));
+        source.sendSystemMessage(Component.translatable("bobby.upgrade.begin"));
         new Thread(() -> {
             for (int i = 0; i < storages.size(); i++) {
                 FakeChunkStorage storage = storages.get(i);
@@ -46,19 +46,17 @@ public class UpgradeCommand implements Command<FabricClientCommandSource> {
                     storage.upgrade(world.dimension(), new ProgressReported(client, i, storages.size()));
                 } catch (IOException e) {
                     e.printStackTrace();
-                    source.sendError(Component.nullToEmpty(e.getMessage()));
+                    source.sendFailure(Component.nullToEmpty(e.getMessage()));
                 }
                 if (worlds != null) {
-                    client.execute(() -> {
-                        worlds.markAsUpToDate(storage);
-                    });
+                    worlds.markAsUpToDate(storage);
                 }
             }
-            client.execute(() -> {
+            client.submit(() -> {
                 if (worlds != null) {
                     worlds.recheckChunks(world, chunkManager.bobby_getRealChunksTracker());
                 }
-                source.sendFeedback(Component.translatable("bobby.upgrade.done"));
+                source.sendSystemMessage(Component.translatable("bobby.upgrade.done"));
                 bobbyChunkManager.loadMissingChunksFromCache();
             });
         }, "bobby-upgrade").start();
@@ -90,7 +88,7 @@ public class UpgradeCommand implements Command<FabricClientCommandSource> {
                 nextReport = now.plus(3, ChronoUnit.SECONDS);
 
                 Component text = Component.translatable("bobby.upgrade.progress", this.done, this.total, this.worldIndex + 1, this.totalWorlds);
-                client.execute(() -> client.gui.getChat().addClientSystemMessage(text));
+                client.submit(() -> client.gui.getChat().addMessage(text));
             }
         }
     }

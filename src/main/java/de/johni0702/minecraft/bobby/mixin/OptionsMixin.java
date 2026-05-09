@@ -19,7 +19,7 @@ public class OptionsMixin {
 
     @Inject(method = "getEffectiveRenderDistance", at = @At("HEAD"), cancellable = true)
     private void forceClientDistanceWhenBobbyIsActive(CallbackInfoReturnable<Integer> ci) {
-        if (Bobby.getInstance().isEnabled()) {
+        if (Bobby.getInstance() != null && Bobby.getInstance().isEnabled()) {
             ci.setReturnValue(this.renderDistance.get());
         }
     }
@@ -31,6 +31,9 @@ public class OptionsMixin {
             index = 1
     )
     private int considerBobbyMaxRenderDistanceSetting(int vanillaSetting) {
+        if (Bobby.getInstance() == null) {
+            return vanillaSetting;
+        }
         int bobbySetting = Bobby.getInstance().getConfig().getMaxRenderDistance();
         return Math.max(vanillaSetting, bobbySetting);
     }

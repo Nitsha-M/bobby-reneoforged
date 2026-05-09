@@ -1,8 +1,9 @@
 package de.johni0702.minecraft.bobby.mixin;
 
-import de.johni0702.minecraft.bobby.ext.LevelLightEngineExt;
+import de.johni0702.minecraft.bobby.ext.LightingProviderExt;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -11,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = LevelLightEngine.class)
-public abstract class LevelLightEngineMixin implements LevelLightEngineExt {
+public abstract class LevelLightEngineMixin implements LightingProviderExt {
     @Unique
     private final LongSet bobbyActiveColumns = new LongOpenHashSet();
 
@@ -25,9 +26,9 @@ public abstract class LevelLightEngineMixin implements LevelLightEngineExt {
         this.bobbyActiveColumns.remove(pos);
     }
 
-    @Inject(method = "lightOnInColumn", at = @At("HEAD"), cancellable = true)
-    private void bobby_getLightSection(long sectionPos, CallbackInfoReturnable<Boolean> ci) {
-        if (bobbyActiveColumns.contains(sectionPos)) {
+    @Inject(method = "lightOnInSection", at = @At("HEAD"), cancellable = true)
+    private void bobby_getLightSection(SectionPos pos, CallbackInfoReturnable<Boolean> ci) {
+        if (bobbyActiveColumns.contains(pos.chunk().toLong())) {
             ci.setReturnValue(true);
         }
     }

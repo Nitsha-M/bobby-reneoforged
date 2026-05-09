@@ -2,8 +2,8 @@ package de.johni0702.minecraft.bobby;
 
 import com.google.common.hash.Hashing;
 import com.mojang.serialization.Codec;
-import de.johni0702.minecraft.bobby.ext.LightEngineExt;
-import de.johni0702.minecraft.bobby.ext.LevelLightEngineExt;
+import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
+import de.johni0702.minecraft.bobby.ext.LightingProviderExt;
 import de.johni0702.minecraft.bobby.ext.WorldChunkExt;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -16,6 +16,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.LongArrayTag;
 import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
@@ -31,7 +32,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
-import net.minecraft.world.level.chunk.Strategy;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import org.apache.commons.lang3.tuple.Pair;
@@ -44,7 +44,6 @@ import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Supplier;
 
 public class ChunkSerializer {
@@ -62,26 +61,28 @@ public class ChunkSerializer {
         }
     }
     private static final Codec<PalettedContainer<BlockState>> BLOCK_CODEC = PalettedContainer.codecRW(
+            Block.BLOCK_STATE_REGISTRY,
             BlockState.CODEC,
-            Strategy.createForBlockStates(Block.BLOCK_STATE_REGISTRY),
+            PalettedContainer.Strategy.SECTION_STATES,
             Blocks.AIR.defaultBlockState()
     );
 
     public static CompoundTag serialize(LevelChunk chunk, LevelLightEngine lightingProvider) {
         RegistryAccess registryManager = chunk.getLevel().registryAccess();
-        Registry<Biome> biomeRegistry = registryManager.lookupOrThrow(Registries.BIOME);
+        Registry<Biome> biomeRegistry = registryManager.registryOrThrow(Registries.BIOME);
         Codec<PalettedContainerRO<Holder<Biome>>> biomeCodec = PalettedContainer.codecRO(
+                biomeRegistry.asHolderIdMap(),
                 biomeRegistry.holderByNameCodec(),
-                Strategy.createForBiomes(biomeRegistry.asHolderIdMap()),
-                biomeRegistry.get(Biomes.PLAINS.identifier()).orElseThrow()
+                PalettedContainer.Strategy.SECTION_BIOMES,
+                biomeRegistry.getHolderOrThrow(Biomes.PLAINS)
         );
 
         ChunkPos chunkPos = chunk.getPos();
         CompoundTag level = new CompoundTag();
-        level.putInt("DataVersion", SharedConstants.getCurrentVersion().dataVersion().version());
-        level.putInt("xPos", chunkPos.x());
-        level.putInt("yPos", chunk.getMinSectionY());
-        level.putInt("zPos", chunkPos.z());
+        level.putInt("DataVersion", SharedConstants.getCurrentVersion().getDataVersion().getVersion());
+        level.putInt("xPos", chunkPos.x);
+        level.putInt("yPos", chunk.getMinSection());
+        level.putInt("zPos", chunkPos.z);
         level.putBoolean("isLightOn", true);
         level.putString("Status", "full");
 
@@ -157,19 +158,20 @@ public class ChunkSerializer {
     public static Pair<LevelChunk, Supplier<LevelChunk>> deserialize(ChunkPos pos, CompoundTag level, Level world) {
         BobbyConfig config = Bobby.getInstance().getConfig();
 
-        ChunkPos chunkPos = new ChunkPos(level.getIntOr("xPos", 0), level.getIntOr("zPos", 0));
+        ChunkPos chunkPos = new ChunkPos(level.getInt("xPos"), level.getInt("zPos"));
         if (!Objects.equals(pos, chunkPos)) {
             LOGGER.error("Chunk file at {} is in the wrong location; relocating. (Expected {}, got {})", pos, pos, chunkPos);
         }
 
-        Registry<Biome> biomeRegistry = world.registryAccess().lookupOrThrow(Registries.BIOME);
+        Registry<Biome> biomeRegistry = world.registryAccess().registryOrThrow(Registries.BIOME);
         Codec<PalettedContainer<Holder<Biome>>> biomeCodec = PalettedContainer.codecRW(
+                biomeRegistry.asHolderIdMap(),
                 biomeRegistry.holderByNameCodec(),
-                Strategy.createForBiomes(biomeRegistry.asHolderIdMap()),
-                biomeRegistry.get(Biomes.PLAINS.identifier()).orElseThrow()
+                PalettedContainer.Strategy.SECTION_BIOMES,
+                biomeRegistry.getHolderOrThrow(Biomes.PLAINS)
         );
 
-        ListTag sectionsTag = level.getListOrEmpty("sections");
+        ListTag sectionsTag = level.getList("sections", Tag.TAG_COMPOUND);
         LevelChunkSection[] chunkSections = new LevelChunkSection[world.getSectionsCount()];
         DataLayer[] blockLight = new DataLayer[chunkSections.length + 2];
         DataLayer[] skyLight = new DataLayer[chunkSections.length + 2];
@@ -177,10 +179,8 @@ public class ChunkSerializer {
         Arrays.fill(blockLight, COMPLETELY_DARK);
 
         for (int i = 0; i < sectionsTag.size(); i++) {
-            Optional<CompoundTag> maybeSectionTag = sectionsTag.getCompound(i);
-            if (maybeSectionTag.isEmpty()) continue;
-            CompoundTag sectionTag = maybeSectionTag.get();
-            int y = sectionTag.getByteOr("Y", (byte) 0);
+            CompoundTag sectionTag = sectionsTag.getCompound(i);
+            int y = sectionTag.getByte("Y");
             int yIndex = world.getSectionIndexFromSectionY(y);
 
             if (yIndex < -1 || yIndex > chunkSections.length) {
@@ -198,19 +198,23 @@ public class ChunkSerializer {
             }
 
             if (yIndex >= 0 && yIndex < chunkSections.length) {
-                PalettedContainer<BlockState> blocks = sectionTag
-                        .getCompound("block_states")
-                        .map(tag -> BLOCK_CODEC.parse(NbtOps.INSTANCE, tag)
-                                .promotePartial((errorMessage) -> logRecoverableError(chunkPos, y, errorMessage))
-                                .getOrThrow())
-                        .orElseGet(() -> new PalettedContainer<>(Blocks.AIR.defaultBlockState(), Strategy.createForBlockStates(Block.BLOCK_STATE_REGISTRY)));
+                PalettedContainer<BlockState> blocks;
+                if (sectionTag.contains("block_states", Tag.TAG_COMPOUND)) {
+                    blocks = BLOCK_CODEC.parse(NbtOps.INSTANCE, sectionTag.getCompound("block_states"))
+                            .promotePartial((errorMessage) -> logRecoverableError(chunkPos, y, errorMessage))
+                            .getOrThrow();
+                } else {
+                    blocks = new PalettedContainer<>(Block.BLOCK_STATE_REGISTRY, Blocks.AIR.defaultBlockState(), PalettedContainer.Strategy.SECTION_STATES);
+                }
 
-                PalettedContainer<Holder<Biome>> biomes = sectionTag
-                        .getCompound("biomes")
-                        .map(tag -> biomeCodec.parse(NbtOps.INSTANCE, tag)
-                                .promotePartial((errorMessage) -> logRecoverableError(chunkPos, y, errorMessage))
-                                .getOrThrow())
-                        .orElseGet(() -> new PalettedContainer<>(biomeRegistry.get(Biomes.PLAINS.identifier()).orElseThrow(), Strategy.createForBiomes(biomeRegistry.asHolderIdMap())));
+                PalettedContainer<Holder<Biome>> biomes;
+                if (sectionTag.contains("biomes", Tag.TAG_COMPOUND)) {
+                    biomes = biomeCodec.parse(NbtOps.INSTANCE, sectionTag.getCompound("biomes"))
+                            .promotePartial((errorMessage) -> logRecoverableError(chunkPos, y, errorMessage))
+                            .getOrThrow();
+                } else {
+                    biomes = new PalettedContainer<>(biomeRegistry.asHolderIdMap(), biomeRegistry.getHolderOrThrow(Biomes.PLAINS), PalettedContainer.Strategy.SECTION_BIOMES);
+                }
 
                 LevelChunkSection chunkSection = new LevelChunkSection(blocks, biomes);
                 chunkSection.recalcBlockCounts();
@@ -219,13 +223,13 @@ public class ChunkSerializer {
                 }
             }
 
-            blockLight[yIndex + 1] = sectionTag.getByteArray("BlockLight")
-                    .map(DataLayer::new)
-                    .orElse(null);
+            if (sectionTag.contains("BlockLight", Tag.TAG_BYTE_ARRAY)) {
+                blockLight[yIndex + 1] = new DataLayer(sectionTag.getByteArray("BlockLight"));
+            }
 
-            skyLight[yIndex + 1] = sectionTag.getByteArray("SkyLight")
-                    .map(DataLayer::new)
-                    .orElse(null);
+            if (sectionTag.contains("SkyLight", Tag.TAG_BYTE_ARRAY)) {
+                skyLight[yIndex + 1] = new DataLayer(sectionTag.getByteArray("SkyLight"));
+            }
         }
 
         // Not all light sections are stored. For block light we simply fall back to a completely dark section.
@@ -256,14 +260,13 @@ public class ChunkSerializer {
 
         FakeChunk chunk = new FakeChunk(world, pos, chunkSections);
 
-        CompoundTag hightmapsTag = level.getCompoundOrEmpty("Heightmaps");
+        CompoundTag hightmapsTag = level.getCompound("Heightmaps");
         EnumSet<Heightmap.Types> missingHightmapTypes = EnumSet.noneOf(Heightmap.Types.class);
 
         for (Heightmap.Types type : chunk.getPersistedStatus().heightmapsAfter()) {
             String key = type.getSerializationKey();
-            Optional<long[]> maybeTag = hightmapsTag.getLongArray(key);
-            if (maybeTag.isPresent()) {
-                chunk.setHeightmap(type, maybeTag.get());
+            if (hightmapsTag.contains(key, Tag.TAG_LONG_ARRAY)) {
+                chunk.setHeightmap(type, hightmapsTag.getLongArray(key));
             } else {
                 missingHightmapTypes.add(type);
             }
@@ -272,10 +275,10 @@ public class ChunkSerializer {
         Heightmap.primeHeightmaps(chunk, missingHightmapTypes);
 
         if (!config.isNoBlockEntities()) {
-            level.getList("block_entities")
-                    .stream()
-                    .flatMap(ListTag::compoundStream)
-                    .forEach(chunk::setBlockEntityNbt);
+            ListTag blockEntitiesTag = level.getList("block_entities", Tag.TAG_COMPOUND);
+            for (int i = 0; i < blockEntitiesTag.size(); i++) {
+                chunk.setBlockEntityNbt(blockEntitiesTag.getCompound(i));
+            }
         }
 
         return Pair.of(chunk, loadChunk(chunk, blockLight, skyLight, config));
@@ -295,11 +298,11 @@ public class ChunkSerializer {
             boolean hasSkyLight = world.dimensionType().hasSkyLight();
             ChunkSource chunkManager = world.getChunkSource();
             LevelLightEngine lightingProvider = chunkManager.getLightEngine();
-            LevelLightEngineExt levelLightEngineExt = LevelLightEngineExt.get(lightingProvider);
-            LightEngineExt blockLightProvider = LightEngineExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
-            LightEngineExt skyLightProvider = LightEngineExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
+            LightingProviderExt lightingProviderExt = LightingProviderExt.get(lightingProvider);
+            ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
+            ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
 
-            levelLightEngineExt.bobby_enabledColumn(SectionPos.getZeroNode(pos.x(), pos.z()));
+            lightingProviderExt.bobby_enabledColumn(pos.toLong());
 
             for (int i = -1; i < chunkSections.length + 1; i++) {
                 int y = world.getSectionYFromSectionIndex(i);
@@ -405,7 +408,7 @@ public class ChunkSerializer {
     }
 
     private static void logRecoverableError(ChunkPos chunkPos, int y, String message) {
-        LOGGER.error("Recoverable errors when loading section [" + chunkPos.x() + ", " + y + ", " + chunkPos.z() + "]: " + message);
+        LOGGER.error("Recoverable errors when loading section [" + chunkPos.x + ", " + y + ", " + chunkPos.z + "]: " + message);
     }
 
     /**

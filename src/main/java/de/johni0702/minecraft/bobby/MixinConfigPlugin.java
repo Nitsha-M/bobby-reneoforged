@@ -1,6 +1,6 @@
 package de.johni0702.minecraft.bobby;
 
-import net.fabricmc.loader.api.FabricLoader;
+import net.neoforged.fml.ModList;
 import org.objectweb.asm.tree.ClassNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,17 +14,28 @@ import java.util.Set;
 public class MixinConfigPlugin implements IMixinConfigPlugin {
     private static final Logger LOGGER = LoggerFactory.getLogger("Bobby/Mixin");
 
-    private final boolean hasSodium = FabricLoader.getInstance().isModLoaded("sodium");
-    private final boolean hasSodium06 = hasSodium && hasClass("net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder");
-    {
-        if (hasSodium && !hasSodium06) {
-            LOGGER.error("Sodium version does not appear to be compatible");
-        }
-    }
-    private final boolean hasStarlight = FabricLoader.getInstance().isModLoaded("starlight");
+    private boolean hasSodium;
+    private boolean hasSodium06;
+    private boolean hasStarlight;
 
     @Override
     public void onLoad(String mixinPackage) {
+        hasSodium = hasClassSafe("net.caffeinemc.mods.sodium.client.SodiumClientMod") || hasClassSafe("me.jellysquid.mods.sodium.client.SodiumClientMod");
+        hasSodium06 = hasClass("net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder") || hasClass("me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTrackerHolder");
+        hasStarlight = hasClassSafe("ca.spottedleaf.starlight.common.light.StarLightInterface");
+
+        if (hasSodium && !hasSodium06) {
+            LOGGER.error("Sodium version appears to be neither compatible with 0.5 nor 0.6");
+        }
+    }
+
+    private static boolean hasClassSafe(String name) {
+        try {
+            Class.forName(name, false, MixinConfigPlugin.class.getClassLoader());
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
     }
 
     @Override

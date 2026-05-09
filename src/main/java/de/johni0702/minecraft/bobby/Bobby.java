@@ -1,22 +1,20 @@
 package de.johni0702.minecraft.bobby;
 
-import ca.stellardrift.confabricate.Confabricate;
 import de.johni0702.minecraft.bobby.commands.CreateWorldCommand;
 import de.johni0702.minecraft.bobby.commands.MergeWorldsCommand;
 import de.johni0702.minecraft.bobby.commands.UpgradeCommand;
 import de.johni0702.minecraft.bobby.commands.WorldsCommand;
-import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
 import de.johni0702.minecraft.bobby.mixin.OptionInstanceAccessor;
 import de.johni0702.minecraft.bobby.mixin.OptionInstanceIntRangeAccessor;
 import de.johni0702.minecraft.bobby.util.FlawlessFrames;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.loader.api.FabricLoader;
+
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.util.Util;
+import net.minecraft.commands.Commands;
 import net.minecraft.world.level.chunk.LevelChunk;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -35,29 +33,50 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.mojang.brigadier.arguments.IntegerArgumentType.integer;
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 
-public class Bobby implements ClientModInitializer {
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.loading.FMLPaths;
+import net.neoforged.fml.ModList;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.client.event.RegisterClientCommandsEvent;
+import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
+
+@Mod("bobby")
+public class Bobby {
     private static final Logger LOGGER = LogManager.getLogger();
 
     public static final String MOD_ID = "bobby";
-    { instance = this; }
+
     private static Bobby instance;
     public static Bobby getInstance() {
         return instance;
     }
 
     private static final Minecraft client = Minecraft.getInstance();
+    private final ModContainer modContainer;
 
     private ValueReference<BobbyConfig, CommentedConfigurationNode> configReference;
 
-    @Override
-    public void onInitializeClient() {
+    public Bobby(IEventBus modEventBus, ModContainer modContainer) {
+        instance = this;
+        this.modContainer = modContainer;
+
+        modEventBus.addListener(this::onClientSetup);
+        NeoForge.EVENT_BUS.addListener(this::registerClientCommands);
+    }
+
+    private void onClientSetup(FMLClientSetupEvent event) {
+        if (ModList.get().isLoaded("cloth_config")) {
+            modContainer.registerExtensionPoint(IConfigScreenFactory.class,
+                    (minecraft, screen) -> createConfigScreen(screen));
+        }
         try {
-            Path configPath = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID + ".conf");
+            Path configPath = FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".conf");
             @SuppressWarnings("resource") // we'll keep this around for the entire lifetime of our mod
-            ConfigurationReference<CommentedConfigurationNode> rootRef = getOrCreateWatchServiceListener()
+            ConfigurationReference<CommentedConfigurationNode> rootRef = createWatchServiceListener()
                     .listenToConfiguration(path -> HoconConfigurationLoader.builder().path(path).build(), configPath);
             configReference = rootRef.referenceTo(BobbyConfig.class);
             rootRef.saveAsync();
@@ -65,24 +84,25 @@ public class Bobby implements ClientModInitializer {
             e.printStackTrace();
         }
 
-        ClientCommandRegistrationCallback.EVENT.register(((dispatcher, registryAccess) ->
-                dispatcher.register(literal("bobby")
-                        .then(literal("worlds").executes(new WorldsCommand(false))
-                                .then(literal("full").executes(new WorldsCommand(true)))
-                                .then(literal("merge")
-                                        .then(argument("source", integer())
-                                                .then(argument("target", integer())
-                                                        .executes(new MergeWorldsCommand()))))
-                                .then(literal("create").executes(new CreateWorldCommand()))
-                        )
-                        .then(literal("upgrade").executes(new UpgradeCommand())))));
-
         FlawlessFrames.onClientInitialization();
 
         configReference.subscribe(new TaintChunksConfigHandler()::update);
         configReference.subscribe(new MaxRenderDistanceConfigHandler()::update);
 
-        Util.ioPool().execute(this::cleanupOldWorlds);
+        Util.ioPool().submit(this::cleanupOldWorlds);
+    }
+
+    private void registerClientCommands(RegisterClientCommandsEvent event) {
+        event.getDispatcher().register(Commands.literal("bobby")
+                .then(Commands.literal("worlds").executes(new WorldsCommand(false))
+                        .then(Commands.literal("full").executes(new WorldsCommand(true)))
+                        .then(Commands.literal("merge")
+                                .then(Commands.argument("source", integer())
+                                        .then(Commands.argument("target", integer())
+                                                .executes(new MergeWorldsCommand()))))
+                        .then(Commands.literal("create").executes(new CreateWorldCommand()))
+                )
+                .then(Commands.literal("upgrade").executes(new UpgradeCommand())));
     }
 
     public BobbyConfig getConfig() {
@@ -97,7 +117,7 @@ public class Bobby implements ClientModInitializer {
     }
 
     public Screen createConfigScreen(Screen parent) {
-        if (FabricLoader.getInstance().isModLoaded("cloth-config2")) {
+        if (ModList.get().isLoaded("cloth_config")) {
             return BobbyConfigScreenFactory.createConfigScreen(parent, getConfig(), configReference::setAndSaveAsync);
         }
         return null;
@@ -117,13 +137,13 @@ public class Bobby implements ClientModInitializer {
                     .filter(it -> basePath.relativize(it).getNameCount() == 4)
                     .flatMap(directory -> {
                         try {
-                            List<Path> toDelete = new ArrayList<>();
                             if (Files.exists(Worlds.metaFile(directory))) {
                                 List<Path> worlds;
                                 try (Stream<Path> fStream = Files.list(directory)) {
                                     worlds = fStream.filter(Files::isDirectory).collect(Collectors.toList());
                                 }
                                 boolean stillHasWorlds = false;
+                                List<Path> toDelete = new ArrayList<>();
                                 for (Path world : worlds) {
                                     if (LastAccessFile.isEverythingOlderThan(world, deleteUnusedRegionsAfterDays)) {
                                         try (Stream<Path> fStream = Files.list(world)) {
@@ -138,19 +158,14 @@ public class Bobby implements ClientModInitializer {
                                         fStream.forEach(toDelete::add);
                                     }
                                 }
+                                return toDelete.stream();
                             } else {
-                                // Multi-world: Remove world directory files if the worlds.meta file is missing
-                                try (Stream<Path> fStream = Files.walk(directory, 2)) {
-                                    fStream.filter(it -> it.relativize(directory).getNameCount() == 2).forEach(toDelete::add);
-                                }
-
                                 if (LastAccessFile.isEverythingOlderThan(directory, deleteUnusedRegionsAfterDays)) {
                                     try (Stream<Path> fStream = Files.list(directory)) {
-                                        fStream.filter(it -> !Files.isDirectory(it)).forEach(toDelete::add);
+                                        return fStream.toList().stream();
                                     }
                                 }
                             }
-                            return toDelete.stream();
                         } catch (IOException e) {
                             LOGGER.error("Failed to read last used file in " + directory + ":", e);
                         }
@@ -187,14 +202,6 @@ public class Bobby implements ClientModInitializer {
         deleteParentsIfEmpty(parent);
     }
 
-    private static WatchServiceListener getOrCreateWatchServiceListener() throws IOException {
-        try {
-            return Confabricate.fileWatcher();
-        } catch (NoClassDefFoundError | NoSuchMethodError ignored) {
-            return createWatchServiceListener();
-        }
-    }
-
     private static WatchServiceListener createWatchServiceListener() throws IOException {
         WatchServiceListener listener = WatchServiceListener.create();
 
@@ -213,7 +220,7 @@ public class Bobby implements ClientModInitializer {
         private boolean wasEnabled = getConfig().isTaintFakeChunks();
 
         public void update(BobbyConfig config) {
-            client.execute(() -> setEnabled(config.isTaintFakeChunks()));
+            client.submit(() -> setEnabled(config.isTaintFakeChunks()));
         }
 
         private void setEnabled(boolean enabled) {
@@ -227,7 +234,7 @@ public class Bobby implements ClientModInitializer {
                 return;
             }
 
-            FakeChunkManager bobbyChunkManager = ((ClientChunkCacheExt) world.getChunkSource()).bobby_getFakeChunkManager();
+            FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource()).bobby_getFakeChunkManager();
             if (bobbyChunkManager == null) {
                 return;
             }
@@ -250,7 +257,7 @@ public class Bobby implements ClientModInitializer {
         }
 
         public void update(BobbyConfig config, boolean increaseOnly) {
-            client.execute(() -> setMaxRenderDistance(config.getMaxRenderDistance(), increaseOnly));
+            client.submit(() -> setMaxRenderDistance(config.getMaxRenderDistance(), increaseOnly));
         }
 
         @SuppressWarnings({"ConstantConditions", "unchecked"})

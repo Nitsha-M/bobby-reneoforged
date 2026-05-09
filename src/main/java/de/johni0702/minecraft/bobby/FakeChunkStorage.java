@@ -1,5 +1,6 @@
 package de.johni0702.minecraft.bobby;
 
+import com.mojang.serialization.MapCodec;
 import de.johni0702.minecraft.bobby.util.RegionPos;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import net.minecraft.SharedConstants;
@@ -7,15 +8,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.level.ChunkMap;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.chunk.ChunkGenerator;
+import net.minecraft.world.level.chunk.storage.ChunkStorage;
 import net.minecraft.world.level.chunk.storage.IOWorker;
 import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
-import net.minecraft.world.level.chunk.storage.SimpleRegionStorage;
 import net.minecraft.world.level.levelgen.FlatLevelSource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -41,7 +40,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class FakeChunkStorage extends SimpleRegionStorage {
+public class FakeChunkStorage extends ChunkStorage {
     private static final Logger LOGGER = LogManager.getLogger();
     private static final Map<Path, FakeChunkStorage> active = new HashMap<>();
 
@@ -77,8 +76,7 @@ public class FakeChunkStorage extends SimpleRegionStorage {
                 new RegionStorageInfo("dummy", Level.OVERWORLD, "bobby"),
                 directory,
                 Minecraft.getInstance().getFixerUpper(),
-                false,
-                DataFixTypes.CHUNK
+                false
         );
 
         this.directory = directory;
@@ -130,12 +128,12 @@ public class FakeChunkStorage extends SimpleRegionStorage {
         if (nbt != null && lastAccess != null) {
             lastAccess.touchRegion(pos.getRegionX(), pos.getRegionZ());
         }
-        if (nbt != null && nbt.getIntOr("DataVersion", 0) != SharedConstants.getCurrentVersion().dataVersion().version()) {
+        if (nbt != null && nbt.getInt("DataVersion") != SharedConstants.getCurrentVersion().getDataVersion().getVersion()) {
             if (sentUpgradeNotification.compareAndSet(false, true)) {
                 Minecraft client = Minecraft.getInstance();
-                client.execute(() -> {
+                client.submit(() -> {
                     Component text = Component.translatable(writeable ? "bobby.upgrade.required" : "bobby.upgrade.fallback_world");
-                    client.gui.getChat().addClientSystemMessage(text);
+                    client.submit(() -> client.gui.getChat().addMessage(text));
                 });
             }
             return null;
@@ -156,9 +154,8 @@ public class FakeChunkStorage extends SimpleRegionStorage {
     }
 
     public void upgrade(ResourceKey<Level> worldKey, BiConsumer<Integer, Integer> progress) throws IOException {
-        Optional<Identifier> generatorKey =
-                BuiltInRegistries.CHUNK_GENERATOR.getResourceKey(FlatLevelSource.CODEC).map(ResourceKey::identifier);
-        CompoundTag contextNbt = ChunkMap.getChunkDataFixContextTag(worldKey, generatorKey);
+        Optional<ResourceKey<MapCodec<? extends ChunkGenerator>>> generatorKey =
+                Optional.of(BuiltInRegistries.CHUNK_GENERATOR.getResourceKey(FlatLevelSource.CODEC).orElseThrow());
 
         List<ChunkPos> chunks = getRegions(directory).stream().flatMap(RegionPos::getContainedChunks).toList();
 
@@ -174,12 +171,12 @@ public class FakeChunkStorage extends SimpleRegionStorage {
 
         try {
             for (ChunkPos chunkPos : chunks) {
-                workExecutor.execute(() -> {
+                workExecutor.submit(() -> {
                     CompoundTag nbt;
                     try {
                         nbt = io.loadAsync(chunkPos).join().orElse(null);
                     } catch (CompletionException e) {
-                        LOGGER.warn("Error reading chunk " + chunkPos.x() + "/" + chunkPos.z() + ":", e);
+                        LOGGER.warn("Error reading chunk " + chunkPos.x + "/" + chunkPos.z + ":", e);
                         nbt = null;
                     }
 
@@ -192,7 +189,7 @@ public class FakeChunkStorage extends SimpleRegionStorage {
                     // from chunks that don't have this set, so we need to set it before we upgrade the chunk.
                     nbt.putBoolean("isLightOn", true);
 
-                    nbt = upgradeChunkTag(nbt, -1, contextNbt, SharedConstants.getCurrentVersion().dataVersion().version());
+                    nbt = upgradeChunkTag(worldKey, null, nbt, generatorKey);
 
                     io.store(chunkPos, nbt).join();
 

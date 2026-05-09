@@ -6,9 +6,6 @@ import it.unimi.dsi.fastutil.longs.Long2LongMap;
 import it.unimi.dsi.fastutil.longs.Long2LongOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.util.Util;
-import net.minecraft.world.level.ChunkPos;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -23,6 +20,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.stream.Stream;
+import net.minecraft.Util;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.level.ChunkPos;
 
 import static de.johni0702.minecraft.bobby.FakeChunkStorage.REGION_FILE_PATTERN;
 
@@ -69,14 +69,14 @@ public class LastAccessFile implements Closeable {
 
     public void touchRegion(int x, int z) {
         synchronized (accessMap) {
-            accessMap.put(ChunkPos.pack(x, z), now);
+            accessMap.put(ChunkPos.asLong(x, z), now);
         }
     }
 
     private void scheduleSave() {
         if (closed) return;
 
-        Util.ioPool().execute(this::saveOrLog);
+        Util.ioPool().submit(this::saveOrLog);
 
         CompletableFuture.delayedExecutor(1, TimeUnit.MINUTES).execute(this::scheduleSave);
     }
@@ -127,7 +127,7 @@ public class LastAccessFile implements Closeable {
             while (buf.isReadable()) {
                 int x = buf.readVarInt();
                 int z = buf.readVarInt();
-                map.put(ChunkPos.pack(x, z), buf.readVarLong());
+                map.put(ChunkPos.asLong(x, z), buf.readVarLong());
             }
         }
         return map;

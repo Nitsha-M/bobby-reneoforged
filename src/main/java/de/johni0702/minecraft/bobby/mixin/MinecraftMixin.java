@@ -3,12 +3,11 @@ package de.johni0702.minecraft.bobby.mixin;
 import de.johni0702.minecraft.bobby.FakeChunkManager;
 import de.johni0702.minecraft.bobby.FakeChunkStorage;
 import de.johni0702.minecraft.bobby.Worlds;
-import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.util.Util;
-import net.minecraft.util.profiling.Profiler;
 import net.minecraft.util.profiling.ProfilerFiller;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Final;
@@ -20,6 +19,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Minecraft.class)
 public abstract class MinecraftMixin {
+    @Shadow private ProfilerFiller profiler;
 
     @Shadow @Final public Options options;
 
@@ -30,12 +30,11 @@ public abstract class MinecraftMixin {
         if (level == null) {
             return;
         }
-        FakeChunkManager bobbyChunkManager = ((ClientChunkCacheExt) level.getChunkSource()).bobby_getFakeChunkManager();
+        FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) level.getChunkSource()).bobby_getFakeChunkManager();
         if (bobbyChunkManager == null) {
             return;
         }
 
-        ProfilerFiller profiler = Profiler.get();
         profiler.push("bobbyUpdate");
 
         int maxFps = options.framerateLimit().get();

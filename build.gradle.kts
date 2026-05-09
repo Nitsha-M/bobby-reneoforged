@@ -1,5 +1,6 @@
 plugins {
-	id("net.fabricmc.fabric-loom") version "1.15.5"
+	id("java")
+	id("net.neoforged.moddev") version "2.0.141"
 	id("maven-publish")
 	id("com.github.breadmoirai.github-release") version "2.2.12"
 	id("com.matthewprenger.cursegradle") version "1.4.0"
@@ -13,7 +14,7 @@ group = mavenGroup
 
 val minecraftVersion: String by project
 val clothConfigVersion: String by project
-val modMenuVersion: String by project
+val neoForgeVersion: String by project
 
 version = "$modVersion+mc$minecraftVersion"
 
@@ -23,56 +24,77 @@ sourceSets {
 		compileClasspath += main.compileClasspath
 		compileClasspath += main.output
 		main.runtimeClasspath += output
-		tasks.jar { from(output) }
+		tasks.named<Jar>("jar") { from(output) }
+	}
+}
+
+neoForge {
+	version = neoForgeVersion
+
+	mods {
+		create("bobby") {
+			sourceSet(sourceSets.main.get())
+			sourceSet(sourceSets.named("sodium06").get())
+		}
+	}
+
+	runs {
+		configureEach {
+			systemProperty("forge.logging.markers", "REGISTRIES")
+			systemProperty("forge.logging.console.level", "debug")
+		}
+		create("client") {
+			client()
+		}
+		create("server") {
+			server()
+		}
 	}
 }
 
 dependencies {
-	val loaderVersion: String by project
-	val fabricApiVersion: String by project
 	val configurateVersion: String by project
 	val geantyrefVersion: String by project
 	val hoconVersion: String by project
 	val sodium06Version: String by project
 	val starlightVersion: String by project
-	val confabricateVersion: String by project
-	minecraft("com.mojang:minecraft:${minecraftVersion}")
-	implementation("net.fabricmc:fabric-loader:${loaderVersion}")
 
-	implementation(include(fabricApi.module("fabric-api-base", fabricApiVersion))!!)
-	implementation(include(fabricApi.module("fabric-command-api-v2", fabricApiVersion))!!)
+	implementation("org.spongepowered:configurate-core:$configurateVersion")
+	implementation("org.spongepowered:configurate-hocon:$configurateVersion")
+	jarJar("org.spongepowered:configurate-core:[$configurateVersion,)")
+	jarJar("org.spongepowered:configurate-hocon:[$configurateVersion,)")
+	jarJar("io.leangen.geantyref:geantyref:[$geantyrefVersion,)")
+	jarJar("com.typesafe:config:[$hoconVersion,)")
+	jarJar("net.kyori:option:[1.1.0,)")
 
-	// we don't need the full thing but our deps pull in an outdated one
-	implementation("net.fabricmc.fabric-api:fabric-api:$fabricApiVersion")
-
-	implementation(include("org.spongepowered:configurate-core:$configurateVersion")!!)
-	implementation(include("org.spongepowered:configurate-hocon:$configurateVersion")!!)
-	include("io.leangen.geantyref:geantyref:$geantyrefVersion")
-	include("com.typesafe:config:$hoconVersion")
+	"additionalRuntimeClasspath"("org.spongepowered:configurate-core:$configurateVersion")
+	"additionalRuntimeClasspath"("org.spongepowered:configurate-hocon:$configurateVersion")
+	"additionalRuntimeClasspath"("io.leangen.geantyref:geantyref:$geantyrefVersion")
+	"additionalRuntimeClasspath"("com.typesafe:config:$hoconVersion")
+	"additionalRuntimeClasspath"("net.kyori:option:1.1.0")
 
 	"sodium06CompileOnly"("maven.modrinth:sodium:$sodium06Version")
 	compileOnly("maven.modrinth:starlight:$starlightVersion")
-	compileOnly("ca.stellardrift:confabricate:$confabricateVersion")
-	implementation("me.shedaniel.cloth:cloth-config-fabric:$clothConfigVersion")
-	implementation("com.terraformersmc:modmenu:$modMenuVersion")
+	
+	implementation("me.shedaniel.cloth:cloth-config-neoforge:$clothConfigVersion")
 }
 
 tasks.processResources {
-	val expansions = mutableMapOf(
-		"version" to project.version,
-		"clothConfigVersion" to clothConfigVersion,
-		"modMenuVersion" to modMenuVersion
-	)
-	inputs.property("expansions", expansions)
-	filesMatching("fabric.mod.json") {
-		expand(expansions)
+	inputs.property("version", project.version)
+	inputs.property("clothConfigVersion", clothConfigVersion)
+
+	filesMatching("META-INF/neoforge.mods.toml") {
+		expand(mutableMapOf(
+			"version" to project.version,
+			"clothConfigVersion" to clothConfigVersion
+		))
 	}
 }
 
 tasks.withType<JavaCompile> {
 	options.encoding = "UTF-8"
-	sourceCompatibility = "25"
-	targetCompatibility = "25"
+	sourceCompatibility = "21"
+	targetCompatibility = "21"
 }
 
 tasks.withType<AbstractArchiveTask> {
@@ -108,73 +130,4 @@ repositories {
 			includeGroup("maven.modrinth")
 		}
 	}
-}
-
-fun readChangelog(): String {
-	val lines = project.file("CHANGELOG.md").readText().lineSequence().iterator()
-	if (lines.next() != "### $modVersion") {
-		throw GradleException("CHANGELOG.md did not start with expected version!")
-	}
-	return lines.asSequence().takeWhile { it.isNotBlank() }.joinToString("\n")
-}
-
-githubRelease {
-	token { project.property("github.token") as String }
-	owner(project.property("github.owner") as String)
-	repo(project.property("github.repo") as String)
-	targetCommitish { gik.head!!.id }
-	releaseName("Version $modVersion for Minecraft $minecraftVersion")
-	releaseAssets(tasks.jar)
-	body(readChangelog())
-}
-
-curseforge {
-	// Would prefer to use lazy `project.property` but https://github.com/matthewprenger/CurseGradle/issues/32
-	apiKey = project.findProperty("curseforge.token") as String? ?: "DUMMY"
-	project(closureOf<com.matthewprenger.cursegradle.CurseProject> {
-		id = project.property("curseforge.id") as String
-		changelog = readChangelog()
-		releaseType = "release"
-		mainArtifact(tasks.jar.flatMap { it.archiveFile }, closureOf<com.matthewprenger.cursegradle.CurseArtifact> {
-			relations(closureOf<com.matthewprenger.cursegradle.CurseRelation> {
-				embeddedLibrary("confabricate")
-				optionalDependency("cloth-config")
-				optionalDependency("modmenu")
-				optionalDependency("sodium")
-			})
-		})
-		addGameVersion("Fabric")
-		addGameVersion(minecraftVersion)
-		addGameVersion("Java 25")
-	})
-	options(closureOf<com.matthewprenger.cursegradle.Options> {
-		javaVersionAutoDetect = false
-		javaIntegration = false
-		forgeGradleIntegration = false
-	})
-}
-tasks.withType<com.matthewprenger.cursegradle.CurseUploadTask> {
-	dependsOn(tasks.jar)
-}
-
-tasks.modrinth {
-	dependsOn(tasks.jar)
-}
-
-modrinth {
-	token.set(project.findProperty("modrinth.token") as String? ?: "DUMMY")
-	projectId.set(project.property("modrinth.id") as String)
-	uploadFile.set(tasks.jar.get())
-	changelog.set(readChangelog())
-	dependencies {
-		optional.project("9s6osm5g") // Cloth Config
-		optional.project("mOgUt4GM") // Mod Menu
-		optional.project("AANobbMI") // Sodium
-	}
-}
-
-val publishAll by tasks.registering {
-	dependsOn(tasks.curseforge)
-	dependsOn(tasks.githubRelease)
-	dependsOn(tasks.modrinth)
 }

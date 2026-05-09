@@ -24,8 +24,9 @@ import it.unimi.dsi.fastutil.objects.Object2LongLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.SharedConstants;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -33,7 +34,6 @@ import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.Util;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.storage.IOWorker;
@@ -79,7 +79,7 @@ public class Worlds implements AutoCloseable {
     private static final int CONCURRENT_COPY_JOBS = 10;
     private static final int MATCH_THRESHOLD = 10;
     private static final int MISMATCH_THRESHOLD = 100;
-    private static final int CURRENT_SAVE_VERSION = SharedConstants.getCurrentVersion().dataVersion().version();
+    private static final int CURRENT_SAVE_VERSION = SharedConstants.getCurrentVersion().getDataVersion().getVersion();
 
     // Executor for saving. Single-threaded so we do not have to worry about races between multiple saves.
     private static final ExecutorService saveExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("bobby-meta-saving", true));
@@ -150,7 +150,7 @@ public class Worlds implements AutoCloseable {
         if (!outdatedWorlds.isEmpty()) {
             Component text = translatable("bobby.upgrade.required");
             Minecraft client = Minecraft.getInstance();
-            client.execute(() -> client.gui.getChat().addClientSystemMessage(text));
+            client.submit(() -> client.gui.getChat().addMessage(text));
         }
     }
 
@@ -174,7 +174,7 @@ public class Worlds implements AutoCloseable {
     public CompletableFuture<Optional<CompoundTag>> loadTag(ChunkPos chunkPos) {
         RegionPos regionPos = RegionPos.from(chunkPos);
         long regionCoord = regionPos.toLong();
-        long chunkCoord = chunkPos.pack();
+        long chunkCoord = chunkPos.toLong();
 
         IntList worldsToLoad = null;
         List<CompletableFuture<Optional<CompoundTag>>> unknownAgeResults = null;
@@ -273,7 +273,7 @@ public class Worlds implements AutoCloseable {
                 for (CompletableFuture<Optional<CompoundTag>> future : fUnknownAgeResults) {
                     CompoundTag result = future.join().orElse(null);
                     if (result != null) {
-                        long age = result.getLongOr("age", 0);
+                        long age = result.getLong("age");
                         if (age > bestAge) {
                             bestAge = age;
                             bestResult = result;
@@ -321,7 +321,7 @@ public class Worlds implements AutoCloseable {
         outdatedWorlds.remove(world);
     }
 
-    public CompletableFuture<?> saveAll() {
+    public void saveAll() {
         List<World> worlds;
         lock.readLock().lock();
         try {
@@ -329,9 +329,9 @@ public class Worlds implements AutoCloseable {
         } finally {
             lock.readLock().unlock();
         }
-        return CompletableFuture.allOf(worlds.stream()
-                .map(it -> it.storage.synchronize(true))
-                .toArray(CompletableFuture[]::new));
+        for (World world : worlds) {
+            world.storage.flushWorker();
+        }
     }
 
     @Override
@@ -340,7 +340,7 @@ public class Worlds implements AutoCloseable {
 
         lock.writeLock().lock();
         try {
-            saveAll().join();
+            saveAll();
 
             if (dirty) {
                 scheduleSave();
@@ -392,8 +392,8 @@ public class Worlds implements AutoCloseable {
                 // Special case: Chunk was not found, remove it from the index
                 Region region = world.regions.get(RegionPos.from(chunkPos).toLong());
                 assert region != null;
-                region.chunks.remove(chunkPos.pack());
-                region.chunkFingerprints.remove(chunkPos.pack());
+                region.chunks.remove(chunkPos.toLong());
+                region.chunkFingerprints.remove(chunkPos.toLong());
                 region.dirty = true;
                 world.markContentDirty();
             } else {
@@ -528,7 +528,7 @@ public class Worlds implements AutoCloseable {
                 case BlockedByPreviouslyQueuedWrites -> {
                     state.stage = MergeStage.WaitForPreviouslyQueuedWrites;
                     Util.ioPool().execute(() -> {
-                        sourceWorld.storage.synchronize(true).join();
+                        sourceWorld.storage.flushWorker();
                         state.stage = MergeStage.Idle;
                     });
                 }
@@ -612,7 +612,7 @@ public class Worlds implements AutoCloseable {
                             continue;
                         }
 
-                        CopyJob copyJob = new CopyJob(sourceWorld, targetWorld, ChunkPos.unpack(chunkCoord), sourceChunkAge, targetChunkAge);
+                        CopyJob copyJob = new CopyJob(sourceWorld, targetWorld, new ChunkPos(chunkCoord), sourceChunkAge, targetChunkAge);
                         state.activeJobs.add(copyJob);
                         copyExecutor.execute(copyJob);
                     }
@@ -634,7 +634,7 @@ public class Worlds implements AutoCloseable {
                     if (state.activeJobs.isEmpty()) {
                         state.stage = MergeStage.Syncing;
                         Util.ioPool().execute(() -> {
-                            targetWorld.storage.synchronize(true).join();
+                            targetWorld.storage.flushWorker();
                             state.stage = MergeStage.WriteTargetMeta;
                         });
                     } else {
@@ -655,7 +655,7 @@ public class Worlds implements AutoCloseable {
                             continue;
                         }
 
-                        long chunkCoord = job.chunkPos.pack();
+                        long chunkCoord = job.chunkPos.toLong();
                         long fingerprint = sourceRegion.chunkFingerprints.get(chunkCoord);
                         long age = job.age;
 
@@ -745,7 +745,7 @@ public class Worlds implements AutoCloseable {
         // Wrapped to wait for all pending fingerprint updates to be committed, so we don't overwrite them
         runOrScheduleWork(() -> {
             tracker.forEach(chunkCoord -> {
-                ChunkPos chunkPos = ChunkPos.unpack(chunkCoord);
+                ChunkPos chunkPos = new ChunkPos(chunkCoord);
                 RegionPos regionPos = RegionPos.from(chunkPos);
                 long regionCoord = regionPos.toLong();
 
@@ -784,7 +784,7 @@ public class Worlds implements AutoCloseable {
 
         RegionPos regionPos = RegionPos.from(chunkPos);
         long regionCoord = regionPos.toLong();
-        long chunkCoord = chunkPos.pack();
+        long chunkCoord = chunkPos.toLong();
 
         Predicate<World> couldWorldMatch = world -> {
             if (world == currentWorld) {
@@ -1029,19 +1029,19 @@ public class Worlds implements AutoCloseable {
 
             nextWorldId = outdatedWorlds.stream().mapToInt(it -> it.id).max().orElse(0) + 1;
         } else {
-            for (Tag worldNbtElement : root.getListOrEmpty("worlds")) {
+            for (Tag worldNbtElement : root.getList("worlds", Tag.TAG_COMPOUND)) {
                 CompoundTag worldNbt = (CompoundTag) worldNbtElement;
-                int id = worldNbt.getInt("id").orElseThrow();
-                int version = worldNbt.getInt("version").orElseThrow();
-                World world = new World(id, version);
-                world.knownRegions.addAll(LongArrayList.wrap(worldNbt.getLongArray("regions").orElseThrow()));
-                worldNbt.getInt("merging_into").ifPresent(it -> world.mergingIntoWorld = it);
-                for (Tag matchNbtElement : worldNbt.getList("matches").orElseThrow()) {
+                World world = new World(worldNbt.getInt("id"), worldNbt.getInt("version"));
+                world.knownRegions.addAll(LongArrayList.wrap(worldNbt.getLongArray("regions")));
+                if (worldNbt.contains("merging_into")) {
+                    world.mergingIntoWorld = worldNbt.getInt("merging_into");
+                }
+                for (Tag matchNbtElement : worldNbt.getList("matches", Tag.TAG_COMPOUND)) {
                     CompoundTag matchNbt = (CompoundTag) matchNbtElement;
-                    int otherWorldId = matchNbt.getInt("world").orElseThrow();
+                    int otherWorldId = matchNbt.getInt("world");
                     Match match = new Match(
-                            new LongOpenHashSet(matchNbt.getLongArray("matching").orElseThrow()),
-                            new LongOpenHashSet(matchNbt.getLongArray("mismatching").orElseThrow())
+                            new LongOpenHashSet(worldNbt.getLongArray("matching")),
+                            new LongOpenHashSet(worldNbt.getLongArray("mismatching"))
                     );
 
                     World otherWorld = worlds.get(otherWorldId);
@@ -1053,7 +1053,7 @@ public class Worlds implements AutoCloseable {
                         world.matchingWorlds.put(otherWorldId, match);
                     }
                 }
-                world.nonMatchingWorlds.addAll(IntArrayList.wrap(worldNbt.getIntArray("non_matching").orElseThrow()));
+                world.nonMatchingWorlds.addAll(IntArrayList.wrap(worldNbt.getIntArray("non_matching")));
 
                 if (world.version == CURRENT_SAVE_VERSION) {
                     worlds.put(world.id, world);
@@ -1062,7 +1062,7 @@ public class Worlds implements AutoCloseable {
                 }
             }
 
-            nextWorldId = root.getIntOr("next_world", 0);
+            nextWorldId = root.getInt("next_world");
         }
 
         World currentWorld;
@@ -1077,16 +1077,16 @@ public class Worlds implements AutoCloseable {
         }
     }
 
-    private World getWorldForCommand(FabricClientCommandSource source, int id) {
+    private World getWorldForCommand(CommandSourceStack source, int id) {
         World world = worlds.get(id);
         if (world == null) {
-            source.sendError(translatable("No active world with id %s. Run `/bobby worlds` for a list of available worlds.", id));
+            source.sendFailure(translatable("No active world with id %s. Run `/bobby worlds` for a list of available worlds.", id));
             return null;
         }
         return world;
     }
 
-    public void userRequestedFork(FabricClientCommandSource source) {
+    public void userRequestedFork(CommandSourceStack source) {
         lock.writeLock().lock();
         try {
             World previousWorld = worlds.get(currentWorldId);
@@ -1102,13 +1102,13 @@ public class Worlds implements AutoCloseable {
             metaDirty = true;
             dirty = true;
 
-            source.sendFeedback(translatable("Created and switched to world %s.", currentWorld));
+            source.sendSystemMessage(translatable("Created and switched to world %s.", currentWorld));
         } finally {
             lock.writeLock().unlock();
         }
     }
 
-    public void userRequestedMerge(FabricClientCommandSource source, int sourceId, int targetId) {
+    public void userRequestedMerge(CommandSourceStack source, int sourceId, int targetId) {
         lock.writeLock().lock();
         try {
             World sourceWorld = getWorldForCommand(source, sourceId);
@@ -1123,18 +1123,18 @@ public class Worlds implements AutoCloseable {
             }
 
             if (targetWorld == sourceWorld) {
-                source.sendError(translatable("Target world is already being merged into source world."));
+                source.sendFailure(translatable("Target world is already being merged into source world."));
                 return;
             }
 
             merge(sourceWorld, targetWorld);
-            source.sendFeedback(translatable("Queued merge of %s into %s. Run `/bobby worlds` for status.", sourceWorld, targetWorld));
+            source.sendSystemMessage(translatable("Queued merge of %s into %s. Run `/bobby worlds` for status.", sourceWorld, targetWorld));
         } finally {
             lock.writeLock().unlock();
         }
     }
 
-    public void sendInfo(FabricClientCommandSource source, boolean loadAllMetadata) {
+    public void sendInfo(CommandSourceStack source, boolean loadAllMetadata) {
         lock.writeLock().lock();
         try {
             sendInfoWithLock(source, loadAllMetadata);
@@ -1143,10 +1143,10 @@ public class Worlds implements AutoCloseable {
         }
     }
 
-    private void sendInfoWithLock(FabricClientCommandSource source, boolean loadAllMetadata) {
+    private void sendInfoWithLock(CommandSourceStack source, boolean loadAllMetadata) {
         boolean allMetadataAvailable = true;
 
-        source.sendFeedback(literal(""));
+        source.sendSystemMessage(literal(""));
 
         ArrayList<World> sortedWorlds = new ArrayList<>(worlds.values());
         sortedWorlds.sort(Comparator.comparing(it -> it.id));
@@ -1161,56 +1161,56 @@ public class Worlds implements AutoCloseable {
                 allMetadataAvailable = false;
             }
 
-            source.sendFeedback(translatable("World %s:", world));
-            source.sendFeedback(translatable("  - Regions: %s (%s loaded, %s loading)",
+            source.sendSystemMessage(translatable("World %s:", world));
+            source.sendSystemMessage(translatable("  - Regions: %s (%s loaded, %s loading)",
                     world.knownRegions.size(), world.regions.size(), world.loadingRegions.size()));
-            source.sendFeedback(translatable("  - Chunks: %s (%s low quality)", knownChunks, lowQualityChunks));
+            source.sendSystemMessage(translatable("  - Chunks: %s (%s low quality)", knownChunks, lowQualityChunks));
             if (unknownChunks > 0) {
-                source.sendFeedback(translatable("             (+ up to %s of unknown state)", unknownChunks));
+                source.sendSystemMessage(translatable("             (+ up to %s of unknown state)", unknownChunks));
             }
             if (unloadedChunks > 0) {
-                source.sendFeedback(translatable("             (+ up to %s in non-loaded regions)", unloadedChunks));
+                source.sendSystemMessage(translatable("             (+ up to %s in non-loaded regions)", unloadedChunks));
             }
             if (!world.matchingWorlds.isEmpty()) {
-                source.sendFeedback(translatable("  - Matching against other worlds:"));
+                source.sendSystemMessage(translatable("  - Matching against other worlds:"));
                 for (World otherWorld : sortedWorlds) {
                     Match match = world.matchingWorlds.get(otherWorld.id);
                     if (match == null) {
                         continue;
                     }
-                    source.sendFeedback(translatable("    - World %s: %s/%s chunks matching/mismatching",
+                    source.sendSystemMessage(translatable("    - World %s: %s/%s chunks matching/mismatching",
                             otherWorld, match.matching.size(), match.mismatching.size()));
                 }
             }
             if (!world.nonMatchingWorlds.isEmpty()) {
-                source.sendFeedback(translatable("  - Not matching against worlds: %s",
+                source.sendSystemMessage(translatable("  - Not matching against worlds: %s",
                         world.nonMatchingWorlds.intStream().sorted().mapToObj(String::valueOf).collect(Collectors.joining(", "))));
             }
             if (world.mergingIntoWorld != -1) {
-                source.sendFeedback(translatable("  - In the process of being merged into %s", world.mergingIntoWorld));
+                source.sendSystemMessage(translatable("  - In the process of being merged into %s", world.mergingIntoWorld));
                 MergeState mergeState = world.mergeState;
                 if (mergeState != null) {
-                    source.sendFeedback(translatable("    - Region: %s", mergeState.activeRegion));
-                    source.sendFeedback(translatable("    - Stage: %s", mergeState.stage));
-                    source.sendFeedback(translatable("    - Copy jobs: %s/%s/%s pending/active/done",
+                    source.sendSystemMessage(translatable("    - Region: %s", mergeState.activeRegion));
+                    source.sendSystemMessage(translatable("    - Stage: %s", mergeState.stage));
+                    source.sendSystemMessage(translatable("    - Copy jobs: %s/%s/%s pending/active/done",
                             copyExecutor.queueSize(), copyExecutor.activeWorkers(), mergeState.finishedJobs.size()));
                 }
             }
         }
 
         if (!outdatedWorlds.isEmpty()) {
-            source.sendFeedback(translatable("Outdated worlds (run `/bobby upgrade`):"));
+            source.sendSystemMessage(translatable("Outdated worlds (run `/bobby upgrade`):"));
             for (World world : outdatedWorlds) {
-                source.sendFeedback(translatable("  - World %s (%s regions)", world, world.knownRegions.size()));
+                source.sendSystemMessage(translatable("  - World %s (%s regions)", world, world.knownRegions.size()));
             }
         }
 
         if (!computeLegacyFingerprintJobs.isEmpty()) {
-            source.sendFeedback(translatable("Fingerprint jobs: %s remaining", computeLegacyFingerprintJobs.size()));
+            source.sendSystemMessage(translatable("Fingerprint jobs: %s remaining", computeLegacyFingerprintJobs.size()));
         }
 
         if (!workQueue.isEmpty()) {
-            source.sendFeedback(translatable("Work queue: %s jobs, bocked on %s (%s)",
+            source.sendSystemMessage(translatable("Work queue: %s jobs, bocked on %s (%s)",
                     workQueue.size(), workQueue.peek(), workQueueBlockedOn));
         }
 
@@ -1218,7 +1218,7 @@ public class Worlds implements AutoCloseable {
             return;
         }
 
-        source.sendFeedback(literal(""));
+        source.sendSystemMessage(literal(""));
 
         if (loadAllMetadata) {
             List<CompletableFuture<?>> futures = new ArrayList<>();
@@ -1231,7 +1231,7 @@ public class Worlds implements AutoCloseable {
                 }
             }
             if (!futures.isEmpty()) {
-                source.sendFeedback(translatable("Loading %s regions.. (run `/bobby worlds` to see progress)", futures.size()));
+                source.sendSystemMessage(translatable("Loading %s regions.. (run `/bobby worlds` to see progress)", futures.size()));
                 CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                         .thenRunAsync(() -> sendInfo(source, true), Minecraft.getInstance());
                 return;
@@ -1243,18 +1243,18 @@ public class Worlds implements AutoCloseable {
                         long chunkCoord = entry.getLongKey();
                         long fingerprint = entry.getLongValue();
                         if (fingerprint == 0) {
-                            futures.add(computeLegacyFingerprint(world, ChunkPos.unpack(chunkCoord), source.getLevel()));
+                            futures.add(computeLegacyFingerprint(world, new ChunkPos(chunkCoord), source.getLevel()));
                         }
                     }
                 }
             }
             if (!futures.isEmpty()) {
-                source.sendFeedback(translatable("Computing fingerprints for %s chunks.. (run `/bobby worlds` to see progress)", futures.size()));
+                source.sendSystemMessage(translatable("Computing fingerprints for %s chunks.. (run `/bobby worlds` to see progress)", futures.size()));
                 CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                         .thenRunAsync(() -> sendInfo(source, false), Minecraft.getInstance());
             }
         } else {
-            source.sendFeedback(translatable("Run `/bobby worlds full` to load non-loaded regions and compute the state of currently unknown chunks."));
+            source.sendSystemMessage(translatable("Run `/bobby worlds full` to load non-loaded regions and compute the state of currently unknown chunks."));
         }
     }
 
@@ -1319,7 +1319,7 @@ public class Worlds implements AutoCloseable {
 
         public void setFingerprint(ChunkPos chunkPos, long fingerprint) {
             RegionPos regionPos = RegionPos.from(chunkPos);
-            long chunkCoord = chunkPos.pack();
+            long chunkCoord = chunkPos.toLong();
             long regionCoord = regionPos.toLong();
 
             if (knownRegions.add(regionCoord)) {
@@ -1401,7 +1401,7 @@ public class Worlds implements AutoCloseable {
             if (Files.notExists(file)) {
                 Region region = new Region();
                 pos.getContainedChunks().forEach(chunkPos -> {
-                    long chunkCoord = chunkPos.pack();
+                    long chunkCoord = chunkPos.toLong();
                     region.chunks.put(chunkCoord, 1); // 1 means "unknown age" (0 is reserved for "no chunk")
                     region.chunkFingerprints.put(chunkCoord, 0); // 0 means "unknown fingerprint"
                 });
@@ -1413,9 +1413,9 @@ public class Worlds implements AutoCloseable {
                 root = NbtIo.readCompressed(in, NbtAccounter.unlimitedHeap());
             }
 
-            long[] chunkCoords = root.getLongArray("chunk_coords").orElseGet(() -> new long[0]);
-            long[] chunkAges = root.getLongArray("chunk_ages").orElseGet(() -> new long[0]);
-            long[] chunkFingerprints = root.getLongArray("chunk_fingerprints").orElseGet(() -> new long[0]);
+            long[] chunkCoords = root.getLongArray("chunk_coords");
+            long[] chunkAges = root.getLongArray("chunk_ages");
+            long[] chunkFingerprints = root.getLongArray("chunk_fingerprints");
 
             Region region = new Region();
             region.chunks.putAll(new Long2LongArrayMap(chunkCoords, chunkAges));
@@ -1535,7 +1535,7 @@ public class Worlds implements AutoCloseable {
         @Override
         public int hashCode() {
             // Using 127 instead of the traditional 31, so worlds are separated by more than a regular render distance
-            return world.id * 127 + RegionPos.hashCode(chunkPos.pack());
+            return world.id * 127 + RegionPos.hashCode(chunkPos.toLong());
         }
     }
 
@@ -1567,7 +1567,7 @@ public class Worlds implements AutoCloseable {
 
             // If source age is unknown, check the nbt for it
             if (sourceAge == 1) {
-                age = nbt.getLongOr("age", 0);
+                age = nbt.getLong("age");
                 if (age < targetAge) {
                     done = true;
                     return;

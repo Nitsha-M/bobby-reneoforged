@@ -1,15 +1,15 @@
 package de.johni0702.minecraft.bobby.mixin;
 
 import de.johni0702.minecraft.bobby.FakeChunk;
-import de.johni0702.minecraft.bobby.ext.ClientPacketListenerExt;
+import de.johni0702.minecraft.bobby.ext.ClientPlayNetworkHandlerExt;
 import de.johni0702.minecraft.bobby.ext.WorldChunkExt;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.neoforged.fml.ModList;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -19,7 +19,7 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ClientPacketListener.class)
-public abstract class ClientPacketListenerMixin implements ClientPacketListenerExt {
+public abstract class ClientPacketListenerMixin implements ClientPlayNetworkHandlerExt {
     private @Shadow ClientLevel level;
 
     //
@@ -32,6 +32,7 @@ public abstract class ClientPacketListenerMixin implements ClientPacketListenerE
     // fake chunk creation code can then get it from in such cases.
     //
     //
+
     @Inject(method = "handleLevelChunkWithLight", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/ClientPacketListener;updateLevelChunk(IILnet/minecraft/network/protocol/game/ClientboundLevelChunkPacketData;)V", shift = At.Shift.AFTER))
     private void storeInitialLightData(ClientboundLevelChunkWithLightPacket packet, CallbackInfo ci) {
         int chunkX = packet.getX();
@@ -45,7 +46,7 @@ public abstract class ClientPacketListenerMixin implements ClientPacketListenerE
 
     // Once MC does actually load the light data, we can drop our manually kept light data, so it can be GCed.
     @Inject(method = "applyLightData", at = @At("HEAD"))
-    private void storeInitialLightData(int chunkX, int chunkZ, ClientboundLightUpdatePacketData data, boolean rebuildChunks, CallbackInfo ci) {
+    private void storeInitialLightData(int chunkX, int chunkZ, ClientboundLightUpdatePacketData data, CallbackInfo ci) {
         LevelChunk chunk = this.level.getChunkSource().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
         if (chunk == null || chunk instanceof FakeChunk) {
             return; // already unloaded, nothing to do
@@ -70,7 +71,7 @@ public abstract class ClientPacketListenerMixin implements ClientPacketListenerE
     @Unique
     private Runnable queuedUnloadFakeLightDataTask;
     @Unique
-    private final boolean hasStarlight = FabricLoader.getInstance().isModLoaded("starlight");
+    private final boolean hasStarlight = ModList.get().isLoaded("starlight");
 
     @Override
     public void bobby_queueUnloadFakeLightDataTask(Runnable runnable) {

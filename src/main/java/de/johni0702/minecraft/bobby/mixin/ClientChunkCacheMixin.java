@@ -4,10 +4,9 @@ import de.johni0702.minecraft.bobby.Bobby;
 import de.johni0702.minecraft.bobby.FakeChunk;
 import de.johni0702.minecraft.bobby.FakeChunkManager;
 import de.johni0702.minecraft.bobby.VisibleChunksTracker;
-import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
 import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.Nullable;
-import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -19,20 +18,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 @Mixin(ClientChunkCache.class)
-public abstract class ClientChunkCacheMixin implements ClientChunkCacheExt {
+public abstract class ClientChunkCacheMixin implements ClientChunkManagerExt {
     @Shadow @Final private LevelChunk emptyChunk;
 
     @Shadow @Nullable public abstract LevelChunk getChunk(int i, int j, ChunkStatus chunkStatus, boolean bl);
@@ -83,8 +81,8 @@ public abstract class ClientChunkCacheMixin implements ClientChunkCacheExt {
         }
     }
 
-    @Inject(method = "replaceWithPacketData", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/ClientChunkCache$Storage;getIndex(II)I"))
-    private void bobbyUnloadFakeChunk(int x, int z, FriendlyByteBuf buf, Map<Heightmap.Types, long[]> heightmaps, Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> consumer, CallbackInfoReturnable<LevelChunk> cir) {
+    @Inject(method = "replaceWithPacketData", at = @At("HEAD"))
+    private void bobbyUnloadFakeChunk(int x, int z, FriendlyByteBuf buf, CompoundTag nbt, Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> consumer, CallbackInfoReturnable<LevelChunk> cir) {
         if (bobbyChunkManager == null) {
             return;
         }
@@ -100,11 +98,7 @@ public abstract class ClientChunkCacheMixin implements ClientChunkCacheExt {
             return;
         }
 
-        LevelChunk chunk = cir.getReturnValue();
-        if (chunk == null) {
-            return; // can happen when server sends out-of-bounds chunk
-        }
-        bobbyChunkManager.fingerprint(chunk);
+        bobbyChunkManager.fingerprint(cir.getReturnValue());
     }
 
     @Unique
@@ -141,7 +135,7 @@ public abstract class ClientChunkCacheMixin implements ClientChunkCacheExt {
             return;
         }
 
-        saveRealChunk(pos.pack());
+        saveRealChunk(pos.toLong());
     }
 
     @Inject(method = "updateViewCenter", at = @At("HEAD"))
@@ -169,18 +163,6 @@ public abstract class ClientChunkCacheMixin implements ClientChunkCacheExt {
         }
 
         substituteFakeChunksForUnloadedRealOnes();
-    }
-
-    @Inject(method = "updateViewRadius", at = @At(value = "FIELD", target = "Lnet/minecraft/client/multiplayer/ClientChunkCache;storage:Lnet/minecraft/client/multiplayer/ClientChunkCache$Storage;", opcode = Opcodes.PUTFIELD, shift = At.Shift.AFTER))
-    private void reAddEmptyFakeChunks(CallbackInfo ci) {
-        if (bobbyChunkManager == null) {
-            return;
-        }
-
-        for (LevelChunk chunk : bobbyChunkManager.getFakeChunks()) {
-            ChunkPos pos = chunk.getPos();
-            bobbyChunkManager.loadEmptySectionsOfFakeChunk(pos.x(), pos.z(), chunk);
-        }
     }
 
     @Inject(method = "gatherStats", at = @At("RETURN"), cancellable = true)
