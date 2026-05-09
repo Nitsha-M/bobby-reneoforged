@@ -13,13 +13,13 @@ import org.spongepowered.asm.mixin.injection.Slice;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(Options.class)
-public class GameOptionsMixin {
+public class OptionsMixin {
     @Shadow
     private @Final OptionInstance<Integer> renderDistance;
 
     @Inject(method = "getEffectiveRenderDistance", at = @At("HEAD"), cancellable = true)
     private void forceClientDistanceWhenBobbyIsActive(CallbackInfoReturnable<Integer> ci) {
-        if (Bobby.getInstance().isEnabled()) {
+        if (Bobby.getInstance() != null && Bobby.getInstance().isEnabled()) {
             ci.setReturnValue(this.renderDistance.get());
         }
     }
@@ -27,10 +27,13 @@ public class GameOptionsMixin {
     @ModifyArg(
             method = "<init>",
             slice = @Slice(from = @At(value = "CONSTANT", args = "stringValue=options.renderDistance")),
-            at = @At(value = "INVOKE", target = "Lnet/minecraft/client/OptionInstance$IntRange;<init>(II)V", ordinal = 0),
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/client/OptionInstance$IntRange;<init>(IIZ)V", ordinal = 0),
             index = 1
     )
     private int considerBobbyMaxRenderDistanceSetting(int vanillaSetting) {
+        if (Bobby.getInstance() == null) {
+            return vanillaSetting;
+        }
         int bobbySetting = Bobby.getInstance().getConfig().getMaxRenderDistance();
         return Math.max(vanillaSetting, bobbySetting);
     }

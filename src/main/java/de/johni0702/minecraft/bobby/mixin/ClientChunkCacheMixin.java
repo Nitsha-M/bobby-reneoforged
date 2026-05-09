@@ -30,11 +30,11 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 @Mixin(ClientChunkCache.class)
-public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
+public abstract class ClientChunkCacheMixin implements ClientChunkManagerExt {
     @Shadow @Final private LevelChunk emptyChunk;
 
     @Shadow @Nullable public abstract LevelChunk getChunk(int i, int j, ChunkStatus chunkStatus, boolean bl);
-    @Shadow private static int getChunkMapRadius(int loadDistance) { throw new AssertionError(); }
+    @Shadow private static int calculateStorageRange(int loadDistance) { throw new AssertionError(); }
 
     protected FakeChunkManager bobbyChunkManager;
 
@@ -49,7 +49,7 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
     private void bobbyInit(ClientLevel world, int loadDistance, CallbackInfo ci) {
         if (Bobby.getInstance().isEnabled()) {
             bobbyChunkManager = new FakeChunkManager(world, (ClientChunkCache) (Object) this);
-            realChunksTracker.update(0, 0, getChunkMapRadius(loadDistance), null, null);
+            realChunksTracker.update(0, 0, calculateStorageRange(loadDistance), null, null);
         }
     }
 
@@ -63,7 +63,7 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
         return realChunksTracker;
     }
 
-    @Inject(method = "getChunk(IILnet/minecraft/world/chunk/ChunkStatus;Z)Lnet/minecraft/world/chunk/WorldChunk;", at = @At("RETURN"), cancellable = true)
+    @Inject(method = "getChunk(IILnet/minecraft/world/level/chunk/status/ChunkStatus;Z)Lnet/minecraft/world/level/chunk/LevelChunk;", at = @At("RETURN"), cancellable = true)
     private void bobbyGetChunk(int x, int z, ChunkStatus chunkStatus, boolean orEmpty, CallbackInfoReturnable<LevelChunk> ci) {
         // Did we find a live chunk?
         if (ci.getReturnValue() != (orEmpty ? emptyChunk : null)) {
@@ -81,7 +81,7 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
         }
     }
 
-    @Inject(method = "loadChunkFromPacket", at = @At("HEAD"))
+    @Inject(method = "replaceWithPacketData", at = @At("HEAD"))
     private void bobbyUnloadFakeChunk(int x, int z, FriendlyByteBuf buf, CompoundTag nbt, Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> consumer, CallbackInfoReturnable<LevelChunk> cir) {
         if (bobbyChunkManager == null) {
             return;
@@ -92,7 +92,7 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
         bobbyChunkManager.unload(x, z, true);
     }
 
-    @Inject(method = "loadChunkFromPacket", at = @At("RETURN"))
+    @Inject(method = "replaceWithPacketData", at = @At("RETURN"))
     private void bobbyFingerprintRealChunk(CallbackInfoReturnable<LevelChunk> cir) {
         if (bobbyChunkManager == null) {
             return;
@@ -129,7 +129,7 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
         bobbyChunkReplacements.clear();
     }
 
-    @Inject(method = "unload", at = @At("HEAD"))
+    @Inject(method = "drop", at = @At("HEAD"))
     private void bobbySaveChunk(ChunkPos pos, CallbackInfo ci) {
         if (bobbyChunkManager == null) {
             return;
@@ -138,7 +138,7 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
         saveRealChunk(pos.toLong());
     }
 
-    @Inject(method = "setChunkMapCenter", at = @At("HEAD"))
+    @Inject(method = "updateViewCenter", at = @At("HEAD"))
     private void bobbySaveChunksBeforeMove(int x, int z, CallbackInfo ci) {
         if (bobbyChunkManager == null) {
             return;
@@ -147,16 +147,16 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
         realChunksTracker.updateCenter(x, z, this::saveRealChunk, null);
     }
 
-    @Inject(method = "updateLoadDistance", at = @At("HEAD"))
+    @Inject(method = "updateViewRadius", at = @At("HEAD"))
     private void bobbySaveChunksBeforeResize(int loadDistance, CallbackInfo ci) {
         if (bobbyChunkManager == null) {
             return;
         }
 
-        realChunksTracker.updateViewDistance(getChunkMapRadius(loadDistance), this::saveRealChunk, null);
+        realChunksTracker.updateViewDistance(calculateStorageRange(loadDistance), this::saveRealChunk, null);
     }
 
-    @Inject(method = { "unload", "setChunkMapCenter", "updateLoadDistance" }, at = @At("RETURN"))
+    @Inject(method = { "drop", "updateViewCenter", "updateViewRadius" }, at = @At("RETURN"))
     private void bobbySubstituteFakeChunksForUnloadedRealOnes(CallbackInfo ci) {
         if (bobbyChunkManager == null) {
             return;
@@ -165,7 +165,7 @@ public abstract class ClientChunkManagerMixin implements ClientChunkManagerExt {
         substituteFakeChunksForUnloadedRealOnes();
     }
 
-    @Inject(method = "getDebugString", at = @At("RETURN"), cancellable = true)
+    @Inject(method = "gatherStats", at = @At("RETURN"), cancellable = true)
     private void bobbyDebugString(CallbackInfoReturnable<String> cir) {
         if (bobbyChunkManager == null) {
             return;

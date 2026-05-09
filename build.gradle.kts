@@ -61,8 +61,17 @@ dependencies {
 
 	implementation("org.spongepowered:configurate-core:$configurateVersion")
 	implementation("org.spongepowered:configurate-hocon:$configurateVersion")
-	jarJar("io.leangen.geantyref:geantyref:$geantyrefVersion")
-	jarJar("com.typesafe:config:$hoconVersion")
+	jarJar("org.spongepowered:configurate-core:[$configurateVersion,)")
+	jarJar("org.spongepowered:configurate-hocon:[$configurateVersion,)")
+	jarJar("io.leangen.geantyref:geantyref:[$geantyrefVersion,)")
+	jarJar("com.typesafe:config:[$hoconVersion,)")
+	jarJar("net.kyori:option:[1.1.0,)")
+
+	"additionalRuntimeClasspath"("org.spongepowered:configurate-core:$configurateVersion")
+	"additionalRuntimeClasspath"("org.spongepowered:configurate-hocon:$configurateVersion")
+	"additionalRuntimeClasspath"("io.leangen.geantyref:geantyref:$geantyrefVersion")
+	"additionalRuntimeClasspath"("com.typesafe:config:$hoconVersion")
+	"additionalRuntimeClasspath"("net.kyori:option:1.1.0")
 
 	"sodium06CompileOnly"("maven.modrinth:sodium:$sodium06Version")
 	compileOnly("maven.modrinth:starlight:$starlightVersion")

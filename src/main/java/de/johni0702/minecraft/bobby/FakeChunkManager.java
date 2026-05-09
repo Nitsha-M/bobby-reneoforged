@@ -4,8 +4,8 @@ import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
 import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
 import de.johni0702.minecraft.bobby.ext.ClientPlayNetworkHandlerExt;
 import de.johni0702.minecraft.bobby.ext.LightingProviderExt;
-import de.johni0702.minecraft.bobby.mixin.BiomeAccessAccessor;
-import de.johni0702.minecraft.bobby.mixin.ClientWorldAccessor;
+import de.johni0702.minecraft.bobby.mixin.BiomeManagerAccessor;
+import de.johni0702.minecraft.bobby.mixin.ClientLevelAccessor;
 import de.johni0702.minecraft.bobby.util.FileSystemUtils;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import it.unimi.dsi.fastutil.longs.Long2LongMap;
@@ -94,8 +94,8 @@ public class FakeChunkManager {
 
         BobbyConfig config = Bobby.getInstance().getConfig();
 
-        String serverName = getCurrentWorldOrServerName(((ClientWorldAccessor) world).getNetworkHandler());
-        long seedHash = ((BiomeAccessAccessor) world.getBiomeManager()).getBiomeZoomSeed();
+        String serverName = getCurrentWorldOrServerName(((ClientLevelAccessor) world).getConnection());
+        long seedHash = ((BiomeManagerAccessor) world.getBiomeManager()).getBiomeZoomSeed();
         ResourceKey<Level> worldKey = world.dimension();
         ResourceLocation worldId = worldKey.location();
         Path storagePath = client.gameDirectory
@@ -398,7 +398,7 @@ public class FakeChunkManager {
                 }
             };
             if (willBeReplaced) {
-                ClientPacketListener networkHandler = ((ClientWorldAccessor) world).getNetworkHandler();
+                ClientPacketListener networkHandler = ((ClientLevelAccessor) world).getConnection();
                 ClientPlayNetworkHandlerExt.get(networkHandler).bobby_queueUnloadFakeLightDataTask(() -> {
                     if (fakeChunks.containsKey(chunkPos)) {
                         // Real chunk has been unloaded in the meantime and is now a fake chunk again, that fake

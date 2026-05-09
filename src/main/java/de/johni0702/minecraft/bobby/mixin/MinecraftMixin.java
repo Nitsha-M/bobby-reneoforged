@@ -18,19 +18,19 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Minecraft.class)
-public abstract class MinecraftClientMixin {
+public abstract class MinecraftMixin {
     @Shadow private ProfilerFiller profiler;
 
     @Shadow @Final public Options options;
 
-    @Shadow @Nullable public ClientLevel world;
+    @Shadow @Nullable public ClientLevel level;
 
-    @Inject(method = "render", at = @At(value = "CONSTANT", args = "stringValue=tick"))
+    @Inject(method = "runTick", at = @At(value = "CONSTANT", args = "stringValue=tick"))
     private void bobbyUpdate(CallbackInfo ci) {
-        if (world == null) {
+        if (level == null) {
             return;
         }
-        FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource()).bobby_getFakeChunkManager();
+        FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) level.getChunkSource()).bobby_getFakeChunkManager();
         if (bobbyChunkManager == null) {
             return;
         }
@@ -47,7 +47,7 @@ public abstract class MinecraftClientMixin {
         profiler.pop();
     }
 
-    @Inject(method = "disconnect(Lnet/minecraft/client/gui/screen/Screen;)V", at = @At("RETURN"))
+    @Inject(method = "clearDownloadedResourcePacks", at = @At("RETURN"))
     private void bobbyClose(CallbackInfo ci) {
         Worlds.closeAll();
         FakeChunkStorage.closeAll();

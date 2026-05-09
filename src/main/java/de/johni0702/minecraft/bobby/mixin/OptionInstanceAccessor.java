@@ -1,13 +1,14 @@
 package de.johni0702.minecraft.bobby.mixin;
 
+import com.mojang.serialization.Codec;
 import net.minecraft.client.OptionInstance;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
-@Mixin(OptionInstance.IntRange.class)
-public interface ValidatingIntSliderCallbacksAccessor {
+@Mixin(OptionInstance.class)
+public interface OptionInstanceAccessor<T> {
     @Accessor
     @Mutable
-    void setMaxInclusive(int value);
+    void setCodec(Codec<T> value);
 }

@@ -5,8 +5,8 @@ import de.johni0702.minecraft.bobby.commands.MergeWorldsCommand;
 import de.johni0702.minecraft.bobby.commands.UpgradeCommand;
 import de.johni0702.minecraft.bobby.commands.WorldsCommand;
 import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
-import de.johni0702.minecraft.bobby.mixin.SimpleOptionAccessor;
-import de.johni0702.minecraft.bobby.mixin.ValidatingIntSliderCallbacksAccessor;
+import de.johni0702.minecraft.bobby.mixin.OptionInstanceAccessor;
+import de.johni0702.minecraft.bobby.mixin.OptionInstanceIntRangeAccessor;
 import de.johni0702.minecraft.bobby.util.FlawlessFrames;
 
 import net.minecraft.Util;
@@ -56,23 +56,23 @@ public class Bobby {
     }
 
     private static final Minecraft client = Minecraft.getInstance();
+    private final ModContainer modContainer;
 
     private ValueReference<BobbyConfig, CommentedConfigurationNode> configReference;
 
     public Bobby(IEventBus modEventBus, ModContainer modContainer) {
         instance = this;
+        this.modContainer = modContainer;
 
         modEventBus.addListener(this::onClientSetup);
-
         NeoForge.EVENT_BUS.addListener(this::registerClientCommands);
+    }
 
+    private void onClientSetup(FMLClientSetupEvent event) {
         if (ModList.get().isLoaded("cloth_config")) {
             modContainer.registerExtensionPoint(IConfigScreenFactory.class,
                     (minecraft, screen) -> createConfigScreen(screen));
         }
-    }
-
-    private void onClientSetup(FMLClientSetupEvent event) {
         try {
             Path configPath = FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".conf");
             @SuppressWarnings("resource") // we'll keep this around for the entire lifetime of our mod
@@ -269,13 +269,13 @@ public class Bobby {
 
             OptionInstance<Integer> viewDistance = client.options.renderDistance();
             if (viewDistance.values() instanceof OptionInstance.IntRange callbacks) {
-                ValidatingIntSliderCallbacksAccessor callbacksAcc = (ValidatingIntSliderCallbacksAccessor)(Object) callbacks;
+                OptionInstanceIntRangeAccessor callbacksAcc = (OptionInstanceIntRangeAccessor)(Object) callbacks;
                 if (increaseOnly) {
                     callbacksAcc.setMaxInclusive(Math.max(callbacks.maxInclusive(), newMaxRenderDistance));
                 } else {
                     callbacksAcc.setMaxInclusive(newMaxRenderDistance);
                 }
-                SimpleOptionAccessor<Integer> optionAccessor = (SimpleOptionAccessor<Integer>)(Object) viewDistance;
+                OptionInstanceAccessor<Integer> optionAccessor = (OptionInstanceAccessor<Integer>)(Object) viewDistance;
                 optionAccessor.setCodec(callbacks.codec());
             }
         }

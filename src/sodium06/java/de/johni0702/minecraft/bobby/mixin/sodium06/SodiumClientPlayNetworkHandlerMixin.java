@@ -17,7 +17,7 @@ public abstract class SodiumClientPlayNetworkHandlerMixin {
     @Shadow
     private ClientLevel level;
 
-    @Inject(method = "onUnloadChunk", at = @At("RETURN"))
+    @Inject(method = "handleForgetLevelChunk", at = @At("RETURN"))
     private void keepChunkRenderedIfReplacedByFakeChunk(ClientboundForgetLevelChunkPacket packet, CallbackInfo ci) {
         int x = packet.pos().x;
         int z = packet.pos().z;

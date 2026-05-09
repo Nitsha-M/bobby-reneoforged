@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(value = LevelLightEngine.class)
-public abstract class LightingProviderMixin implements LightingProviderExt {
+public abstract class LevelLightEngineMixin implements LightingProviderExt {
     @Unique
     private final LongSet bobbyActiveColumns = new LongOpenHashSet();
 
@@ -26,7 +26,7 @@ public abstract class LightingProviderMixin implements LightingProviderExt {
         this.bobbyActiveColumns.remove(pos);
     }
 
-    @Inject(method = "isLightingEnabled", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "lightOnInSection", at = @At("HEAD"), cancellable = true)
     private void bobby_getLightSection(SectionPos pos, CallbackInfoReturnable<Boolean> ci) {
         if (bobbyActiveColumns.contains(pos.chunk().toLong())) {
             ci.setReturnValue(true);

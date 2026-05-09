@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
         "ca.spottedleaf.starlight.common.light.StarLightInterface$1",
         "ca.spottedleaf.starlight.common.light.StarLightInterface$2"
 })
-public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
+public abstract class LightEngineMixin implements ChunkLightProviderExt {
     private final Long2ObjectMap<DataLayer> bobbySectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
     private final Long2ObjectMap<DataLayer> bobbyOriginalSectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
 
@@ -65,7 +65,7 @@ public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
         }
     }
 
-    @Inject(method = "getLightSection(Lnet/minecraft/util/math/ChunkSectionPos;)Lnet/minecraft/world/chunk/ChunkNibbleArray;", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "getDataLayerData(Lnet/minecraft/core/SectionPos;)Lnet/minecraft/world/level/chunk/DataLayer;", at = @At("HEAD"), cancellable = true)
     private void bobby_getLightSection(SectionPos pos, CallbackInfoReturnable<DataLayer> ci) {
         DataLayer data = this.bobbySectionData.get(pos.asLong());
         if (data != null) {
@@ -73,7 +73,7 @@ public abstract class ChunkLightProviderMixin implements ChunkLightProviderExt {
         }
     }
 
-    @Inject(method = "getLightLevel(Lnet/minecraft/util/math/BlockPos;)I", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "getLightValue(Lnet/minecraft/core/BlockPos;)I", at = @At("HEAD"), cancellable = true)
     private void bobby_getLightSection(BlockPos blockPos, CallbackInfoReturnable<Integer> ci) {
         DataLayer data = this.bobbySectionData.get(SectionPos.of(blockPos).asLong());
         if (data != null) {

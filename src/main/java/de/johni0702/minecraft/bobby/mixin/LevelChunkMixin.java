@@ -8,7 +8,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
 @Mixin(LevelChunk.class)
-public class WorldChunkMixin implements WorldChunkExt {
+public class LevelChunkMixin implements WorldChunkExt {
     @Unique
     private ClientboundLightUpdatePacketData initialLightData;
 
