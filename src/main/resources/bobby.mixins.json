@@ -19,8 +19,7 @@
     "MinecraftMixin",
     "OptionInstanceAccessor",
     "OptionInstanceIntRangeAccessor",
-    "LevelChunkMixin",
-    "LevelRendererMixin"
+    "LevelChunkMixin"
   ],
   "injectors": {
     "defaultRequire": 1

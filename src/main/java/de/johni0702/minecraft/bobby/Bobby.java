@@ -51,6 +51,7 @@ public class Bobby {
     public static final String MOD_ID = "bobby";
 
     private static Bobby instance;
+
     public static Bobby getInstance() {
         return instance;
     }
@@ -58,11 +59,33 @@ public class Bobby {
     private static final Minecraft client = Minecraft.getInstance();
     private final ModContainer modContainer;
 
-    private ValueReference<BobbyConfig, CommentedConfigurationNode> configReference;
+    private static ValueReference<BobbyConfig, CommentedConfigurationNode> configReference;
+
+    public static void initStaticConfig() {
+        if (configReference != null)
+            return;
+        try {
+            Path configPath = FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".conf");
+            @SuppressWarnings("resource")
+            ConfigurationReference<CommentedConfigurationNode> rootRef = createWatchServiceListener()
+                    .listenToConfiguration(path -> HoconConfigurationLoader.builder().path(path).build(), configPath);
+            configReference = rootRef.referenceTo(BobbyConfig.class);
+            rootRef.saveAsync();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static BobbyConfig getConfigStatic() {
+        initStaticConfig();
+        return configReference != null ? configReference.get() : BobbyConfig.DEFAULT;
+    }
 
     public Bobby(IEventBus modEventBus, ModContainer modContainer) {
         instance = this;
         this.modContainer = modContainer;
+
+        initStaticConfig();
 
         modEventBus.addListener(this::onClientSetup);
         NeoForge.EVENT_BUS.addListener(this::registerClientCommands);
@@ -72,16 +95,6 @@ public class Bobby {
         if (ModList.get().isLoaded("cloth_config")) {
             modContainer.registerExtensionPoint(IConfigScreenFactory.class,
                     (minecraft, screen) -> createConfigScreen(screen));
-        }
-        try {
-            Path configPath = FMLPaths.CONFIGDIR.get().resolve(MOD_ID + ".conf");
-            @SuppressWarnings("resource") // we'll keep this around for the entire lifetime of our mod
-            ConfigurationReference<CommentedConfigurationNode> rootRef = createWatchServiceListener()
-                    .listenToConfiguration(path -> HoconConfigurationLoader.builder().path(path).build(), configPath);
-            configReference = rootRef.referenceTo(BobbyConfig.class);
-            rootRef.saveAsync();
-        } catch (IOException e) {
-            e.printStackTrace();
         }
 
         FlawlessFrames.onClientInitialization();
@@ -100,19 +113,19 @@ public class Bobby {
                                 .then(Commands.argument("source", integer())
                                         .then(Commands.argument("target", integer())
                                                 .executes(new MergeWorldsCommand()))))
-                        .then(Commands.literal("create").executes(new CreateWorldCommand()))
-                )
+                        .then(Commands.literal("create").executes(new CreateWorldCommand())))
                 .then(Commands.literal("upgrade").executes(new UpgradeCommand())));
     }
 
     public BobbyConfig getConfig() {
-        return configReference != null ? configReference.get() : BobbyConfig.DEFAULT;
+        return getConfigStatic();
     }
 
     public boolean isEnabled() {
         BobbyConfig config = getConfig();
         return config.isEnabled()
-                // For singleplayer, disable ourselves unless the view-distance overwrite is active.
+                // For singleplayer, disable ourselves unless the view-distance overwrite is
+                // active.
                 && (client.getSingleplayerServer() == null || config.getViewDistanceOverwrite() != 0);
     }
 
@@ -153,7 +166,8 @@ public class Bobby {
                                         stillHasWorlds = true;
                                     }
                                 }
-                                if (!stillHasWorlds && LastAccessFile.isEverythingOlderThan(directory, deleteUnusedRegionsAfterDays)) {
+                                if (!stillHasWorlds && LastAccessFile.isEverythingOlderThan(directory,
+                                        deleteUnusedRegionsAfterDays)) {
                                     try (Stream<Path> fStream = Files.list(directory)) {
                                         fStream.forEach(toDelete::add);
                                     }
@@ -178,7 +192,8 @@ public class Bobby {
         }
 
         for (Path path : toBeDeleted) {
-            if (!Files.exists(path)) continue;
+            if (!Files.exists(path))
+                continue;
             try {
                 Files.delete(path);
                 deleteParentsIfEmpty(path);
@@ -234,7 +249,8 @@ public class Bobby {
                 return;
             }
 
-            FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource()).bobby_getFakeChunkManager();
+            FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource())
+                    .bobby_getFakeChunkManager();
             if (bobbyChunkManager == null) {
                 return;
             }
@@ -260,7 +276,7 @@ public class Bobby {
             client.submit(() -> setMaxRenderDistance(config.getMaxRenderDistance(), increaseOnly));
         }
 
-        @SuppressWarnings({"ConstantConditions", "unchecked"})
+        @SuppressWarnings({ "ConstantConditions", "unchecked" })
         private void setMaxRenderDistance(int newMaxRenderDistance, boolean increaseOnly) {
             if (oldMaxRenderDistance == newMaxRenderDistance) {
                 return;
@@ -269,13 +285,13 @@ public class Bobby {
 
             OptionInstance<Integer> viewDistance = client.options.renderDistance();
             if (viewDistance.values() instanceof OptionInstance.IntRange callbacks) {
-                OptionInstanceIntRangeAccessor callbacksAcc = (OptionInstanceIntRangeAccessor)(Object) callbacks;
+                OptionInstanceIntRangeAccessor callbacksAcc = (OptionInstanceIntRangeAccessor) (Object) callbacks;
                 if (increaseOnly) {
                     callbacksAcc.setMaxInclusive(Math.max(callbacks.maxInclusive(), newMaxRenderDistance));
                 } else {
                     callbacksAcc.setMaxInclusive(newMaxRenderDistance);
                 }
-                OptionInstanceAccessor<Integer> optionAccessor = (OptionInstanceAccessor<Integer>)(Object) viewDistance;
+                OptionInstanceAccessor<Integer> optionAccessor = (OptionInstanceAccessor<Integer>) (Object) viewDistance;
                 optionAccessor.setCodec(callbacks.codec());
             }
         }

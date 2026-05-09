@@ -11,4 +11,9 @@ public abstract class FogRendererMixin {
     private static int clampMaxValue(int viewDistance) {
         return Math.min(viewDistance, 32);
     }
+
+    @ModifyVariable(method = "setupFog", at = @At("HEAD"), ordinal = 0, argsOnly = true)
+    private static float clampFogDistance(float farPlaneDistance) {
+        return Math.min(farPlaneDistance, 32 * 16.0F);
+    }
 }
