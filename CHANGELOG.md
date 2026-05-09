@@ -1,3 +1,32 @@
+### 5.2.12
+- Update to Minecraft 26.1
+
+### 5.2.11
+- Update to Minecraft 1.21.11
+
+### 5.2.10
+- Update to Minecraft 1.21.9
+
+### 5.2.9
+- Fix "Network Protocol Error" when "Dynamic World Management" is enabled and some worlds aren't fully matched (thanks to Alex33856!)
+- Fix some worlds not being deleted with "Dynamic World Management" (thanks to Alex33856!)
+
+### 5.2.8
+- Update to Minecraft 1.21.6
+- Update Korean, Japanese, Chinese translations
+
+### 5.2.7
+- Update to Minecraft 1.21.5
+
+### 5.2.6
+- Update to Minecraft 1.21.4
+- Fix "Network Protocol Error" when server sends block updates for chunks it has already unloaded (#341)
+- Add Korean, Japanese, German, and French translations, updated Traditional Chinese translation
+
+### 5.2.5
+- Update to Minecraft 1.21.2
+- Fix missing fake chunks and "Network Protocol Error"s when server sends out-of-bounds chunk (#313)
+
 ### 5.2.4
 - Add support for Sodium 0.6.0 (#308)
 
