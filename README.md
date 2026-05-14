@@ -2,7 +2,7 @@
 
 <p align="center">
 Bobby is a Minecraft mod which allows for render distances greater than the server's view-distance setting.
- </p>
+</p>
 
 <p align="center">
     <a href="https://discord.gg/zuwPkg5MHs">

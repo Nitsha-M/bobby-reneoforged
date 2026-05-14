@@ -9,6 +9,9 @@ config="bobby.mixins.json"
 [[mixins]]
 config="bobby-sodium06-compat.mixins.json"
 
+[[mixins]]
+config="bobby-embeddium-compat.mixins.json"
+
 [[mods]]
 modId="bobby"
 version="${version}"
