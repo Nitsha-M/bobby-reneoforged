@@ -17,11 +17,15 @@ public class MixinConfigPlugin implements IMixinConfigPlugin {
     private boolean hasSodium;
     private boolean hasSodium06;
     private boolean hasStarlight;
+    private boolean hasEmbeddium;
 
     @Override
     public void onLoad(String mixinPackage) {
-        hasSodium = hasClassSafe("net.caffeinemc.mods.sodium.client.SodiumClientMod") || hasClassSafe("me.jellysquid.mods.sodium.client.SodiumClientMod");
-        hasSodium06 = hasClass("net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder") || hasClass("me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTrackerHolder");
+        hasSodium = hasClassSafe("net.caffeinemc.mods.sodium.client.SodiumClientMod")
+                || hasClassSafe("me.jellysquid.mods.sodium.client.SodiumClientMod");
+        hasEmbeddium = hasClass("org.embeddedt.embeddium.impl.render.chunk.map.ChunkTrackerHolder");
+        hasSodium06 = hasClass("net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder")
+                || hasClass("me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTrackerHolder");
         hasStarlight = hasClassSafe("ca.spottedleaf.starlight.common.light.StarLightInterface");
 
         if (hasSodium && !hasSodium06) {
@@ -50,6 +54,9 @@ public class MixinConfigPlugin implements IMixinConfigPlugin {
         }
         if (mixinClassName.contains(".sodium06.")) {
             return hasSodium06;
+        }
+        if (mixinClassName.contains(".embeddium.")) {
+            return hasEmbeddium;
         }
         return true;
     }

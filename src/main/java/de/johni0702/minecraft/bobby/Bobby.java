@@ -122,7 +122,7 @@ public class Bobby {
     }
 
     public boolean isEnabled() {
-        BobbyConfig config = getConfig();
+        BobbyConfig config = getConfigStatic();
         return config.isEnabled()
                 // For singleplayer, disable ourselves unless the view-distance overwrite is
                 // active.
@@ -285,14 +285,11 @@ public class Bobby {
 
             OptionInstance<Integer> viewDistance = client.options.renderDistance();
             if (viewDistance.values() instanceof OptionInstance.IntRange callbacks) {
-                OptionInstanceIntRangeAccessor callbacksAcc = (OptionInstanceIntRangeAccessor) (Object) callbacks;
-                if (increaseOnly) {
-                    callbacksAcc.setMaxInclusive(Math.max(callbacks.maxInclusive(), newMaxRenderDistance));
-                } else {
-                    callbacksAcc.setMaxInclusive(newMaxRenderDistance);
-                }
+                int newMax = increaseOnly ? Math.max(callbacks.maxInclusive(), newMaxRenderDistance) : newMaxRenderDistance;
+                OptionInstance.IntRange newRange = new OptionInstance.IntRange(callbacks.minInclusive(), newMax);
                 OptionInstanceAccessor<Integer> optionAccessor = (OptionInstanceAccessor<Integer>) (Object) viewDistance;
-                optionAccessor.setCodec(callbacks.codec());
+                optionAccessor.setValues(newRange);
+                optionAccessor.setCodec(newRange.codec());
             }
         }
     }

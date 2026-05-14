@@ -1,7 +1,6 @@
 plugins {
 	id("java")
 	id("net.neoforged.moddev") version "2.0.141"
-	id("maven-publish")
 	id("com.github.breadmoirai.github-release") version "2.2.12"
 	id("com.matthewprenger.cursegradle") version "1.4.0"
 	id("com.modrinth.minotaur") version "2.+"
@@ -26,6 +25,13 @@ sourceSets {
 		main.runtimeClasspath += output
 		tasks.named<Jar>("jar") { from(output) }
 	}
+
+	create("embeddium") {
+		compileClasspath += main.compileClasspath
+		compileClasspath += main.output
+		main.runtimeClasspath += output
+		tasks.named<Jar>("jar") { from(output) }
+	}
 }
 
 neoForge {
@@ -35,6 +41,7 @@ neoForge {
 		create("bobby") {
 			sourceSet(sourceSets.main.get())
 			sourceSet(sourceSets.named("sodium06").get())
+			sourceSet(sourceSets.named("embeddium").get())
 		}
 	}
 
@@ -57,6 +64,7 @@ dependencies {
 	val geantyrefVersion: String by project
 	val hoconVersion: String by project
 	val sodium06Version: String by project
+	val embeddiumVersion: String by project
 	val starlightVersion: String by project
 
 	implementation("org.spongepowered:configurate-core:$configurateVersion")
@@ -75,7 +83,8 @@ dependencies {
 
 	"sodium06CompileOnly"("maven.modrinth:sodium:$sodium06Version")
 	compileOnly("maven.modrinth:starlight:$starlightVersion")
-	
+	"embeddiumCompileOnly"("maven.modrinth:embeddium:$embeddiumVersion")
+
 	implementation("me.shedaniel.cloth:cloth-config-neoforge:$clothConfigVersion")
 }
 
@@ -104,14 +113,6 @@ tasks.withType<AbstractArchiveTask> {
 
 tasks.jar {
 	from("LICENSE.md")
-}
-
-publishing {
-	publications {
-		create("mavenJava", MavenPublication::class.java) {
-			from(components["java"])
-		}
-	}
 }
 
 repositories {

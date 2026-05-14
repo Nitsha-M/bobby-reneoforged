@@ -11,4 +11,8 @@ public interface OptionInstanceAccessor<T> {
     @Accessor
     @Mutable
     void setCodec(Codec<T> value);
+
+    @Accessor("values")
+    @Mutable
+    void setValues(OptionInstance.ValueSet<T> values);
 }
