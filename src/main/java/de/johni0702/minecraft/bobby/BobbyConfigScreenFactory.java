@@ -5,7 +5,6 @@ import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
 import me.shedaniel.clothconfig2.gui.entries.BooleanListEntry;
 import me.shedaniel.clothconfig2.gui.entries.IntegerListEntry;
-import me.shedaniel.clothconfig2.gui.entries.IntegerSliderEntry;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import java.util.function.Consumer;
@@ -62,10 +61,14 @@ public class BobbyConfigScreenFactory {
                 .setDefaultValue(defaultConfig.getMaxRenderDistance())
                 .build();
 
-        IntegerSliderEntry viewDistanceOverwrite = entryBuilder
-                .startIntSlider(Component.translatable("option.bobby.view_distance_overwrite"), config.getViewDistanceOverwrite(), 0, 32)
+        // Use a plain int field (like the other numeric options) instead of a cloth-config slider: the slider widget
+        // mis-renders here (the handle escapes outside the widget and can no longer be dragged) and its fixed 0..32
+        // range could not represent overwrites matching a raised Max Render Distance anyway.
+        IntegerListEntry viewDistanceOverwrite = entryBuilder
+                .startIntField(Component.translatable("option.bobby.view_distance_overwrite"), config.getViewDistanceOverwrite())
                 .setTooltip(Component.translatable("tooltip.option.bobby.view_distance_overwrite"))
                 .setDefaultValue(defaultConfig.getViewDistanceOverwrite())
+                .setMin(0)
                 .build();
 
         ConfigCategory general = builder.getOrCreateCategory(Component.translatable("category.bobby.general"));

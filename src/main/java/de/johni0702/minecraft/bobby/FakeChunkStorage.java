@@ -131,9 +131,9 @@ public class FakeChunkStorage extends ChunkStorage {
         if (nbt != null && nbt.getInt("DataVersion") != SharedConstants.getCurrentVersion().getDataVersion().getVersion()) {
             if (sentUpgradeNotification.compareAndSet(false, true)) {
                 Minecraft client = Minecraft.getInstance();
-                client.submit(() -> {
+                client.execute(() -> {
                     Component text = Component.translatable(writeable ? "bobby.upgrade.required" : "bobby.upgrade.fallback_world");
-                    client.submit(() -> client.gui.getChat().addMessage(text));
+                    client.gui.getChat().addMessage(text);
                 });
             }
             return null;

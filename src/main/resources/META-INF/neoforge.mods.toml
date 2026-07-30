@@ -10,6 +10,9 @@ config="bobby.mixins.json"
 config="bobby-sodium06-compat.mixins.json"
 
 [[mixins]]
+config="bobby-sodium08-compat.mixins.json"
+
+[[mixins]]
 config="bobby-embeddium-compat.mixins.json"
 
 [[mods]]
@@ -18,6 +21,7 @@ version="${version}"
 displayName="Bobby ReNeoForged"
 updateJSONURL=""
 displayURL="https://modrinth.com/mod/bobby"
+displayTest="IGNORE_ALL_VERSION"
 logoFile="assets/bobby/icon.png"
 authors="johni0702"
 description="Allows for render distances greater than the server's view-distance setting."

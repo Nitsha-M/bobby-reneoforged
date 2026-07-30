@@ -4,7 +4,7 @@ import de.johni0702.minecraft.bobby.Bobby;
 import de.johni0702.minecraft.bobby.FakeChunk;
 import de.johni0702.minecraft.bobby.FakeChunkManager;
 import de.johni0702.minecraft.bobby.VisibleChunksTracker;
-import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
 import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Final;
@@ -30,7 +30,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 @Mixin(ClientChunkCache.class)
-public abstract class ClientChunkCacheMixin implements ClientChunkManagerExt {
+public abstract class ClientChunkCacheMixin implements ClientChunkCacheExt {
     @Shadow @Final private LevelChunk emptyChunk;
 
     @Shadow @Nullable public abstract LevelChunk getChunk(int i, int j, ChunkStatus chunkStatus, boolean bl);

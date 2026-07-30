@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "de.johni0702.minecraft.bobby.mixin",
+  "refmap": "bobby-sodium08-compat.refmap.json",
+  "compatibilityLevel": "JAVA_21",
+  "plugin": "de.johni0702.minecraft.bobby.MixinConfigPlugin",
+  "client": [
+    "sodium08.SodiumChunkCacheMixin",
+    "sodium08.SodiumClientPlayNetworkHandlerMixin",
+    "sodium08.SodiumClientLevelMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

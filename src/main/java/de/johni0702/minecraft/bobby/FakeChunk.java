@@ -1,13 +1,15 @@
 package de.johni0702.minecraft.bobby;
 
-import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
+import de.johni0702.minecraft.bobby.ext.LightEngineExt;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -15,6 +17,7 @@ import net.minecraft.world.level.chunk.UpgradeData;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.ticks.LevelChunkTicks;
+import org.jetbrains.annotations.Nullable;
 
 // Fake chunks are of this subclass, primarily so we have an easy way of identifying them.
 public class FakeChunk extends LevelChunk {
@@ -41,8 +44,8 @@ public class FakeChunk extends LevelChunk {
         LevelRenderer worldRenderer = client.levelRenderer;
 
         LevelLightEngine lightingProvider = getLevel().getLightEngine();
-        ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
-        ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
+        LightEngineExt blockLightProvider = LightEngineExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
+        LightEngineExt skyLightProvider = LightEngineExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
 
         int blockDelta = enabled ? 5 : 0;
         int skyDelta = enabled ? -3 + (int) (-7 * gamma) : 0;
@@ -56,7 +59,7 @@ public class FakeChunk extends LevelChunk {
         }
     }
 
-    private void updateTaintedState(ChunkLightProviderExt lightProvider, int x, int y, int z, int delta) {
+    private void updateTaintedState(LightEngineExt lightProvider, int x, int y, int z, int delta) {
         if (lightProvider == null) {
             return;
         }
@@ -65,5 +68,12 @@ public class FakeChunk extends LevelChunk {
 
     public void setHeightmap(Heightmap.Types type, Heightmap heightmap) {
         this.heightmaps.put(type, heightmap);
+    }
+
+    @Override
+    public @Nullable BlockState setBlockState(BlockPos pos, BlockState state, boolean moved) {
+        // some servers incorrectly send block updates for chunks they just unloaded -> race with the
+        // background serialization thread. See https://github.com/Johni0702/bobby/issues/341
+        return null;
     }
 }

@@ -6,9 +6,10 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "de.johni0702.minecraft.bobby.MixinConfigPlugin",
   "client": [
-    "sodium06.SodiumChunkManagerMixin",
+    "sodium06.SodiumChunkCacheMixin",
     "sodium06.SodiumClientPlayNetworkHandlerMixin",
-    "sodium06.SodiumGameOptionPagesMixin"
+    "sodium06.SodiumGameOptionPagesMixin",
+    "sodium06.SodiumClientLevelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

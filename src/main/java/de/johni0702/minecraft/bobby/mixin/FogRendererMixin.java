@@ -1,5 +1,6 @@
 package de.johni0702.minecraft.bobby.mixin;
 
+import net.minecraft.client.Camera;
 import net.minecraft.client.renderer.FogRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -13,7 +14,10 @@ public abstract class FogRendererMixin {
     }
 
     @ModifyVariable(method = "setupFog", at = @At("HEAD"), ordinal = 0, argsOnly = true)
-    private static float clampFogDistance(float farPlaneDistance) {
-        return Math.min(farPlaneDistance, 32 * 16.0F);
+    private static float clampFogDistance(float farPlaneDistance, Camera camera, FogRenderer.FogMode fogMode) {
+        if (fogMode == FogRenderer.FogMode.FOG_SKY) {
+            return Math.min(farPlaneDistance, 32 * 16.0F);
+        }
+        return farPlaneDistance;
     }
 }

@@ -4,7 +4,7 @@ import com.mojang.brigadier.Command;
 import com.mojang.brigadier.context.CommandContext;
 import de.johni0702.minecraft.bobby.FakeChunkManager;
 import de.johni0702.minecraft.bobby.Worlds;
-import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -16,7 +16,7 @@ public class CreateWorldCommand implements Command<CommandSourceStack> {
         CommandSourceStack source = context.getSource();
         ClientLevel world = Minecraft.getInstance().level;
 
-        FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource()).bobby_getFakeChunkManager();
+        FakeChunkManager bobbyChunkManager = ((ClientChunkCacheExt) world.getChunkSource()).bobby_getFakeChunkManager();
         if (bobbyChunkManager == null) {
             source.sendFailure(Component.translatable("bobby.upgrade.not_enabled"));
             return 0;

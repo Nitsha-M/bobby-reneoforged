@@ -1,6 +1,6 @@
 package de.johni0702.minecraft.bobby.mixin.sodium06;
 
-import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
 import net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkStatus;
 import net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder;
 import net.minecraft.client.multiplayer.ClientChunkCache;
@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 
 @Mixin(value = ClientChunkCache.class, priority = 1010) // higher than our normal one
-public abstract class SodiumChunkManagerMixin implements ClientChunkManagerExt {
+public abstract class SodiumChunkCacheMixin implements ClientChunkCacheExt {
 
     @Shadow @Final
     ClientLevel level;

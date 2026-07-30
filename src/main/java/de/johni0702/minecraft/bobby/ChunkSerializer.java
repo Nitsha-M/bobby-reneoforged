@@ -2,8 +2,8 @@ package de.johni0702.minecraft.bobby;
 
 import com.google.common.hash.Hashing;
 import com.mojang.serialization.Codec;
-import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
-import de.johni0702.minecraft.bobby.ext.LightingProviderExt;
+import de.johni0702.minecraft.bobby.ext.LightEngineExt;
+import de.johni0702.minecraft.bobby.ext.LevelLightEngineExt;
 import de.johni0702.minecraft.bobby.ext.WorldChunkExt;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -298,11 +298,11 @@ public class ChunkSerializer {
             boolean hasSkyLight = world.dimensionType().hasSkyLight();
             ChunkSource chunkManager = world.getChunkSource();
             LevelLightEngine lightingProvider = chunkManager.getLightEngine();
-            LightingProviderExt lightingProviderExt = LightingProviderExt.get(lightingProvider);
-            ChunkLightProviderExt blockLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
-            ChunkLightProviderExt skyLightProvider = ChunkLightProviderExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
+            LevelLightEngineExt levelLightEngineExt = LevelLightEngineExt.get(lightingProvider);
+            LightEngineExt blockLightProvider = LightEngineExt.get(lightingProvider.getLayerListener(LightLayer.BLOCK));
+            LightEngineExt skyLightProvider = LightEngineExt.get(lightingProvider.getLayerListener(LightLayer.SKY));
 
-            lightingProviderExt.bobby_enabledColumn(pos.toLong());
+            levelLightEngineExt.bobby_enabledColumn(pos.toLong());
 
             for (int i = -1; i < chunkSections.length + 1; i++) {
                 int y = world.getSectionYFromSectionIndex(i);

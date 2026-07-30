@@ -1,6 +1,6 @@
 package de.johni0702.minecraft.bobby.mixin;
 
-import de.johni0702.minecraft.bobby.ext.ChunkLightProviderExt;
+import de.johni0702.minecraft.bobby.ext.LightEngineExt;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMaps;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
         "ca.spottedleaf.starlight.common.light.StarLightInterface$1",
         "ca.spottedleaf.starlight.common.light.StarLightInterface$2"
 })
-public abstract class LightEngineMixin implements ChunkLightProviderExt {
+public abstract class LightEngineMixin implements LightEngineExt {
     private final Long2ObjectMap<DataLayer> bobbySectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
     private final Long2ObjectMap<DataLayer> bobbyOriginalSectionData = Long2ObjectMaps.synchronize(new Long2ObjectOpenHashMap<>());
 

@@ -1,7 +1,7 @@
 package de.johni0702.minecraft.bobby.mixin.embeddium;
 
 import de.johni0702.minecraft.bobby.FakeChunk;
-import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
@@ -23,7 +23,7 @@ public abstract class EmbeddiumClientPlayNetworkHandlerMixin {
         int z = packet.pos().z;
         LevelChunk chunk = this.level.getChunk(x, z);
         if (chunk instanceof FakeChunk) {
-            ((ClientChunkManagerExt) level.getChunkSource()).bobby_onFakeChunkAdded(x, z);
+            ((ClientChunkCacheExt) level.getChunkSource()).bobby_onFakeChunkAdded(x, z);
         }
     }
 }

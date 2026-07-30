@@ -4,7 +4,7 @@ import de.johni0702.minecraft.bobby.commands.CreateWorldCommand;
 import de.johni0702.minecraft.bobby.commands.MergeWorldsCommand;
 import de.johni0702.minecraft.bobby.commands.UpgradeCommand;
 import de.johni0702.minecraft.bobby.commands.WorldsCommand;
-import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
 import de.johni0702.minecraft.bobby.mixin.OptionInstanceAccessor;
 import de.johni0702.minecraft.bobby.mixin.OptionInstanceIntRangeAccessor;
 import de.johni0702.minecraft.bobby.util.FlawlessFrames;
@@ -16,6 +16,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.commands.Commands;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.neoforged.api.distmarker.Dist;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.configurate.CommentedConfigurationNode;
@@ -44,7 +45,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 
-@Mod("bobby")
+@Mod(value = "bobby", dist = Dist.CLIENT)
 public class Bobby {
     private static final Logger LOGGER = LogManager.getLogger();
 
@@ -124,8 +125,7 @@ public class Bobby {
     public boolean isEnabled() {
         BobbyConfig config = getConfigStatic();
         return config.isEnabled()
-                // For singleplayer, disable ourselves unless the view-distance overwrite is
-                // active.
+                // For singleplayer, disable ourselves unless the view-distance overwrite is active.
                 && (client.getSingleplayerServer() == null || config.getViewDistanceOverwrite() != 0);
     }
 
@@ -150,13 +150,13 @@ public class Bobby {
                     .filter(it -> basePath.relativize(it).getNameCount() == 4)
                     .flatMap(directory -> {
                         try {
+                            List<Path> toDelete = new ArrayList<>();
                             if (Files.exists(Worlds.metaFile(directory))) {
                                 List<Path> worlds;
                                 try (Stream<Path> fStream = Files.list(directory)) {
                                     worlds = fStream.filter(Files::isDirectory).collect(Collectors.toList());
                                 }
                                 boolean stillHasWorlds = false;
-                                List<Path> toDelete = new ArrayList<>();
                                 for (Path world : worlds) {
                                     if (LastAccessFile.isEverythingOlderThan(world, deleteUnusedRegionsAfterDays)) {
                                         try (Stream<Path> fStream = Files.list(world)) {
@@ -166,20 +166,24 @@ public class Bobby {
                                         stillHasWorlds = true;
                                     }
                                 }
-                                if (!stillHasWorlds && LastAccessFile.isEverythingOlderThan(directory,
-                                        deleteUnusedRegionsAfterDays)) {
+                                if (!stillHasWorlds && LastAccessFile.isEverythingOlderThan(directory, deleteUnusedRegionsAfterDays)) {
                                     try (Stream<Path> fStream = Files.list(directory)) {
                                         fStream.forEach(toDelete::add);
                                     }
                                 }
-                                return toDelete.stream();
                             } else {
+                                // Multi-world: Remove world directory files if the worlds.meta file is missing
+                                try (Stream<Path> fStream = Files.walk(directory, 2)) {
+                                    fStream.filter(it -> it.relativize(directory).getNameCount() == 2).forEach(toDelete::add);
+                                }
+
                                 if (LastAccessFile.isEverythingOlderThan(directory, deleteUnusedRegionsAfterDays)) {
                                     try (Stream<Path> fStream = Files.list(directory)) {
-                                        return fStream.toList().stream();
+                                        fStream.filter(it -> !Files.isDirectory(it)).forEach(toDelete::add);
                                     }
                                 }
                             }
+                            return toDelete.stream();
                         } catch (IOException e) {
                             LOGGER.error("Failed to read last used file in " + directory + ":", e);
                         }
@@ -192,8 +196,7 @@ public class Bobby {
         }
 
         for (Path path : toBeDeleted) {
-            if (!Files.exists(path))
-                continue;
+            if (!Files.exists(path)) continue;
             try {
                 Files.delete(path);
                 deleteParentsIfEmpty(path);
@@ -249,7 +252,7 @@ public class Bobby {
                 return;
             }
 
-            FakeChunkManager bobbyChunkManager = ((ClientChunkManagerExt) world.getChunkSource())
+            FakeChunkManager bobbyChunkManager = ((ClientChunkCacheExt) world.getChunkSource())
                     .bobby_getFakeChunkManager();
             if (bobbyChunkManager == null) {
                 return;
@@ -276,7 +279,7 @@ public class Bobby {
             client.submit(() -> setMaxRenderDistance(config.getMaxRenderDistance(), increaseOnly));
         }
 
-        @SuppressWarnings({ "ConstantConditions", "unchecked" })
+        @SuppressWarnings({"ConstantConditions", "unchecked"})
         private void setMaxRenderDistance(int newMaxRenderDistance, boolean increaseOnly) {
             if (oldMaxRenderDistance == newMaxRenderDistance) {
                 return;
@@ -285,11 +288,14 @@ public class Bobby {
 
             OptionInstance<Integer> viewDistance = client.options.renderDistance();
             if (viewDistance.values() instanceof OptionInstance.IntRange callbacks) {
-                int newMax = increaseOnly ? Math.max(callbacks.maxInclusive(), newMaxRenderDistance) : newMaxRenderDistance;
-                OptionInstance.IntRange newRange = new OptionInstance.IntRange(callbacks.minInclusive(), newMax);
-                OptionInstanceAccessor<Integer> optionAccessor = (OptionInstanceAccessor<Integer>) (Object) viewDistance;
-                optionAccessor.setValues(newRange);
-                optionAccessor.setCodec(newRange.codec());
+                OptionInstanceIntRangeAccessor callbacksAcc = (OptionInstanceIntRangeAccessor)(Object) callbacks;
+                if (increaseOnly) {
+                    callbacksAcc.setMaxInclusive(Math.max(callbacks.maxInclusive(), newMaxRenderDistance));
+                } else {
+                    callbacksAcc.setMaxInclusive(newMaxRenderDistance);
+                }
+                OptionInstanceAccessor<Integer> optionAccessor = (OptionInstanceAccessor<Integer>)(Object) viewDistance;
+                optionAccessor.setCodec(callbacks.codec());
             }
         }
     }

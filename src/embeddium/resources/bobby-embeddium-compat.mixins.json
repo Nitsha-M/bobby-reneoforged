@@ -6,9 +6,10 @@
   "compatibilityLevel": "JAVA_21",
   "plugin": "de.johni0702.minecraft.bobby.MixinConfigPlugin",
   "client": [
-    "embeddium.EmbeddiumChunkManagerMixin",
+    "embeddium.EmbeddiumChunkCacheMixin",
     "embeddium.EmbeddiumClientPlayNetworkHandlerMixin",
-    "embeddium.EmbeddiumGameOptionPagesMixin"
+    "embeddium.EmbeddiumGameOptionPagesMixin",
+    "embeddium.EmbeddiumClientLevelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

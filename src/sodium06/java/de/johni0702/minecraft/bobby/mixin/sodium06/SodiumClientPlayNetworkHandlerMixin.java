@@ -1,7 +1,7 @@
 package de.johni0702.minecraft.bobby.mixin.sodium06;
 
 import de.johni0702.minecraft.bobby.FakeChunk;
-import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
 import 	net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket;
@@ -27,7 +27,7 @@ public abstract class SodiumClientPlayNetworkHandlerMixin {
         // would get the last word and un-render the chunk. To prevent that, when we have replaced it with a fake chunk,
         // we simply re-add the flags.
         if (chunk instanceof FakeChunk) {
-            ((ClientChunkManagerExt) level.getChunkSource()).bobby_onFakeChunkAdded(x, z);
+            ((ClientChunkCacheExt) level.getChunkSource()).bobby_onFakeChunkAdded(x, z);
         }
     }
 }

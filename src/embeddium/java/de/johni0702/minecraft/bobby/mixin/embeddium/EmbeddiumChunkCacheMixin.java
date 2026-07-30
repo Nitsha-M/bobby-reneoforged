@@ -1,6 +1,6 @@
 package de.johni0702.minecraft.bobby.mixin.embeddium;
 
-import de.johni0702.minecraft.bobby.ext.ClientChunkManagerExt;
+import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.SectionPos;
@@ -11,7 +11,7 @@ import org.embeddedt.embeddium.impl.render.chunk.map.ChunkTrackerHolder;
 import org.embeddedt.embeddium.impl.render.chunk.map.ChunkStatus;
 
 @Mixin(value = ClientChunkCache.class, priority = 2200)
-public abstract class EmbeddiumChunkManagerMixin implements ClientChunkManagerExt {
+public abstract class EmbeddiumChunkCacheMixin implements ClientChunkCacheExt {
     @Shadow
     @Final
     ClientLevel level;

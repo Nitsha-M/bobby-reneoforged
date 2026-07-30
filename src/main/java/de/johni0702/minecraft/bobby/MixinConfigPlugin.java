@@ -55,6 +55,9 @@ public class MixinConfigPlugin implements IMixinConfigPlugin {
         if (mixinClassName.contains(".sodium06.")) {
             return hasSodium06;
         }
+        if (mixinClassName.contains(".sodium08.")) {
+            return hasSodium06;
+        }
         if (mixinClassName.contains(".embeddium.")) {
             return hasEmbeddium;
         }

@@ -20,8 +20,7 @@ public class OptionsMixin {
     @Inject(method = "getEffectiveRenderDistance", at = @At("HEAD"), cancellable = true)
     private void forceClientDistanceWhenBobbyIsActive(CallbackInfoReturnable<Integer> ci) {
         if (Bobby.getInstance() != null && Bobby.getInstance().isEnabled()) {
-            int dist = this.renderDistance.get();
-            ci.setReturnValue(dist);
+            ci.setReturnValue(this.renderDistance.get());
         }
     }
 

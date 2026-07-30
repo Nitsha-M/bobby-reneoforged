@@ -26,6 +26,13 @@ sourceSets {
 		tasks.named<Jar>("jar") { from(output) }
 	}
 
+	create("sodium08") {
+		compileClasspath += main.compileClasspath
+		compileClasspath += main.output
+		main.runtimeClasspath += output
+		tasks.named<Jar>("jar") { from(output) }
+	}
+
 	create("embeddium") {
 		compileClasspath += main.compileClasspath
 		compileClasspath += main.output
@@ -41,6 +48,7 @@ neoForge {
 		create("bobby") {
 			sourceSet(sourceSets.main.get())
 			sourceSet(sourceSets.named("sodium06").get())
+			sourceSet(sourceSets.named("sodium08").get())
 			sourceSet(sourceSets.named("embeddium").get())
 		}
 	}
@@ -64,8 +72,8 @@ dependencies {
 	val geantyrefVersion: String by project
 	val hoconVersion: String by project
 	val sodium06Version: String by project
+	val sodium08Version: String by project
 	val embeddiumVersion: String by project
-	val starlightVersion: String by project
 
 	implementation("org.spongepowered:configurate-core:$configurateVersion")
 	implementation("org.spongepowered:configurate-hocon:$configurateVersion")
@@ -82,8 +90,8 @@ dependencies {
 	"additionalRuntimeClasspath"("net.kyori:option:1.1.0")
 
 	"sodium06CompileOnly"("maven.modrinth:sodium:$sodium06Version")
-	compileOnly("maven.modrinth:starlight:$starlightVersion")
 	"embeddiumCompileOnly"("maven.modrinth:embeddium:$embeddiumVersion")
+	"sodium08CompileOnly"(files("C:/sodium-mc1.21.1-0.8.12-beta.1/neoforge/build/libs/sodium-neoforge-0.8.12-SNAPSHOT+mc1.21.1-local-mod.jar"))
 
 	implementation("me.shedaniel.cloth:cloth-config-neoforge:$clothConfigVersion")
 }
@@ -129,6 +137,11 @@ repositories {
 	maven("https://api.modrinth.com/maven") {
 		content {
 			includeGroup("maven.modrinth")
+		}
+	}
+	maven("https://www.cursemaven.com") {
+		content {
+			includeGroup("curse.maven")
 		}
 	}
 }

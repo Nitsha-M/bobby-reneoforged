@@ -1,7 +1,7 @@
 package de.johni0702.minecraft.bobby.mixin;
 
 import de.johni0702.minecraft.bobby.FakeChunk;
-import de.johni0702.minecraft.bobby.ext.ClientPlayNetworkHandlerExt;
+import de.johni0702.minecraft.bobby.ext.ClientPacketListenerExt;
 import de.johni0702.minecraft.bobby.ext.WorldChunkExt;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -19,7 +19,7 @@ import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ClientPacketListener.class)
-public abstract class ClientPacketListenerMixin implements ClientPlayNetworkHandlerExt {
+public abstract class ClientPacketListenerMixin implements ClientPacketListenerExt {
     private @Shadow ClientLevel level;
 
     //
